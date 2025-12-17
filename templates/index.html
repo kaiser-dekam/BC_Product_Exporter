@@ -1,0 +1,649 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="post" action="{{ url_for('export') }}" id="field-form">
+    <input type="hidden" name="ordered_fields" id="ordered_fields" value="">
+    <input type="hidden" name="store_hash" id="store_hash_field" value="{{ saved_creds.get('store_hash', '') }}">
+    <input type="hidden" name="client_id" id="client_id_field" value="{{ saved_creds.get('client_id', '') }}">
+    <input type="hidden" name="access_token" id="access_token_field" value="{{ saved_creds.get('access_token', '') }}">
+    <section class="card" style="margin-bottom: 14px;">
+        <div class="layout-grid" style="grid-template-columns: 1.6fr 1fr; align-items: center;">
+            <div>
+                <h1 style="margin-bottom: 10px;">Export-ready product data without the busywork.</h1>
+                <p class="muted" style="margin-bottom: 12px;">Connect your BigCommerce store, pick the exact fields (brands, images, variants, pricing, inventory, and more), and export a clean CSV in seconds.</p>
+                <div class="inline">
+                    <div class="badge">BigCommerce API</div>
+                    <div class="badge">Variants & images</div>
+                    <div class="badge">Brands & categories</div>
+                </div>
+            </div>
+            <div class="card" style="background: linear-gradient(135deg, rgba(106,155,255,0.12), rgba(124,93,255,0.12));">
+                <h4>What you can export</h4>
+                <p class="muted" style="margin-bottom: 10px;">Popular fields include:</p>
+                {% set field_list = field_options.items() | list %}
+                <div class="pill-list" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+                    {% for key, label in field_list[:10] %}
+                    <span class="badge">{{ label }}</span>
+                    {% endfor %}
+                </div>
+                <p class="muted" style="margin-top: 8px;">Plus pricing, weights/dimensions, custom fields, images, variants, and more.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="card" id="gate-card" style="margin-bottom: 14px;">
+        <h3>1. Get started</h3>
+        <p class="muted">Choose how to connect: sign in or paste API credentials. You can skip login if you prefer.</p>
+        <div class="layout-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
+            <div class="card" style="background: rgba(255,255,255,0.03);">
+                <h4 class="inline" style="align-items: center; gap: 8px;">
+                    Use my API keys
+                    <span class="badge" title="In BigCommerce: Settings → API Accounts → Create V2/V3 API Token. Copy the Store Hash from the API Path and the Client ID/Access Token from the new token. You may need admin access for this, keep this information confidential.">Where do I find this?</span>
+                </h4>
+                <p class="muted">Paste your store hash, client ID, and access token to continue.</p>
+                <p class="muted">We recommend Read-Only access and rotate your credentials often.</p>
+                <p class="muted">We never store your credentials, but the ability create an account and save them for the future is coming soon.</p>
+                <button type="button" id="cta-api" class="secondary">Continue with API credentials</button>
+            </div>
+            <!-- <div class="card" style="background: rgba(255,255,255,0.03);">
+                <h4>Sign in (optional)</h4>
+                <p class="muted">Use an email/password to reuse saved credentials.</p>
+                <p class="muted">All credentials are saved securely and never shared.</p>
+                <button type="button" id="cta-auth" class="secondary">Sign in then continue</button>
+            </div> -->
+        </div>
+    </section>
+
+    <section id="selection-shell" style="{% if not saved_creds %}display:none;{% endif %}">
+        <section class="card" style="margin-bottom: 14px;">
+            <div class="inline" style="justify-content: space-between; align-items: center;">
+                <div>
+                    <h3>Selected columns</h3>
+                    <p class="muted">Live preview of the column order. Updates as you toggle fields.</p>
+                </div>
+                <button type="button" id="fb-template-btn" class="secondary">Facebook Commerce template</button>
+            </div>
+            <div id="tab-preview" class="tab-preview">
+                <span class="tab-placeholder">No fields selected yet.</span>
+            </div>
+            <div id="custom-domain-wrapper" class="inline" style="margin-top: 10px; display: none;">
+                <label class="field-pill" style="gap: 6px; align-items: center;">
+                    <span style="color: var(--muted);">Domain for custom URLs</span>
+                    <input type="text" name="custom_domain" id="custom_domain" placeholder="https://example.com" style="min-width: 240px;">
+                </label>
+            </div>
+        </section>
+        <div id="builder-section" class="layout-grid">
+            <section class="card">
+                <h3>Fields library</h3>
+                <p class="muted">Toggle any field to include it in your CSV.</p>
+                <div class="pill-list">
+                    {% for key, label in field_options.items() %}
+                <label class="field-pill">
+                    <input type="checkbox" name="fields" value="{{ key }}">
+                    <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </section>
+        <section class="card">
+            <h3>Selection & order</h3>
+            <p class="muted">Drag and drop to arrange the export columns. <br> Fields will fill the CSV columns from left to right.</p>
+            <div id="order-list" class="order-list"></div>
+            <div class="divider"></div>
+            <div class="filter-bar">
+                <label class="toggle">
+                    <input type="checkbox" name="include_variants">
+                    <span>Include variants</span>
+                </label>
+                <label class="toggle">
+                    <input type="checkbox" name="include_unavailable">
+                    <span>Include unavailable products</span>
+                </label>
+                <label class="toggle">
+                    <input type="checkbox" name="include_hidden">
+                    <span>Include hidden products</span>
+                </label>
+            </div>
+            <div class="inline">
+                <button type="submit">Export CSV</button>
+                <button type="button" class="secondary" id="reset-btn">Reset selection</button>
+            </div>
+        </section>
+        </div>
+    </section>
+</form>
+
+<!-- API credential modal -->
+<div id="api-modal" class="modal-backdrop">
+    <div class="modal">
+        <div class="modal-header">
+            <h4>Enter API credentials</h4>
+            <button type="button" class="close-btn" data-close="api-modal">&times;</button>
+        </div>
+        <p class="muted">Paste your BigCommerce credentials to continue.</p>
+        <div class="stack" id="api-modal-form">
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Upload BigCommerce credentials txt (optional)</span>
+                <input type="file" id="modal-api-file" accept=".txt">
+            </label>
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Store hash</span>
+                <input type="text" id="modal-store-hash" placeholder="store_hash">
+            </label>
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Client ID</span>
+                <input type="text" id="modal-client-id" placeholder="client_id">
+            </label>
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Access token</span>
+                <input type="password" id="modal-access-token" placeholder="access_token">
+            </label>
+            <div class="inline">
+                <button type="button" id="api-continue">Continue</button>
+                <button type="button" class="secondary" data-close="api-modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auth modal: Step 1 -->
+<div id="auth-modal" class="modal-backdrop">
+    <div class="modal">
+        <div class="modal-header">
+            <h4>Sign in or create account</h4>
+            <button type="button" class="close-btn" data-close="auth-modal">&times;</button>
+        </div>
+        <p class="muted">Use email/password (Firebase). After signing in, you’ll be prompted for API credentials.</p>
+        <div class="stack" id="auth-modal-form">
+            <div class="inline" style="gap: 6px; flex-wrap: wrap;">
+                <input type="email" id="modal-auth-email" placeholder="Email" style="min-width: 180px;">
+                <input type="password" id="modal-auth-password" placeholder="Password" style="min-width: 140px;">
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="modal-auth-signin">Sign in / Sign up</button>
+                <button type="button" class="secondary" data-close="auth-modal">Cancel</button>
+            </div>
+            <p class="muted" id="auth-modal-status">Awaiting sign in.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Auth modal: Step 2 for API creds after auth -->
+<div id="auth-creds-modal" class="modal-backdrop">
+    <div class="modal">
+        <div class="modal-header">
+            <h4>Enter API credentials</h4>
+            <button type="button" class="close-btn" data-close="auth-creds-modal">&times;</button>
+        </div>
+        <p class="muted">Upload the BigCommerce txt or paste your credentials.</p>
+        <div class="stack" id="auth-creds-modal-form">
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Upload BigCommerce credentials txt (optional)</span>
+                <input type="file" id="modal-auth-file" accept=".txt">
+            </label>
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Store hash</span>
+                <input type="text" id="modal-auth-store-hash" placeholder="store_hash">
+            </label>
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Client ID</span>
+                <input type="text" id="modal-auth-client-id" placeholder="client_id">
+            </label>
+            <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
+                <span class="muted">Access token</span>
+                <input type="password" id="modal-auth-access-token" placeholder="access_token">
+            </label>
+            <label class="toggle">
+                <input type="checkbox" id="modal-remember-creds">
+                <span>Remember API credentials for this user (browser + Firestore)</span>
+            </label>
+            <div class="modal-actions">
+                <button type="button" id="auth-continue">Continue</button>
+                <button type="button" class="secondary" data-close="auth-creds-modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const checkboxes = document.querySelectorAll('input[name="fields"]');
+    const orderList = document.getElementById('order-list');
+    const orderedFieldsInput = document.getElementById('ordered_fields');
+    const resetBtn = document.getElementById('reset-btn');
+    const tabPreview = document.getElementById('tab-preview');
+    const customDomainWrapper = document.getElementById('custom-domain-wrapper');
+    const customDomainInput = document.getElementById('custom_domain');
+    const storeHashInput = document.getElementById('store_hash_field');
+    const clientIdInput = document.getElementById('client_id_field');
+    const accessTokenInput = document.getElementById('access_token_field');
+    const builderSection = document.getElementById('builder-section');
+    const selectionShell = document.getElementById('selection-shell');
+    const gateCard = document.getElementById('gate-card');
+    const ctaApi = document.getElementById('cta-api');
+    const ctaAuth = document.getElementById('cta-auth');
+    const hasSessionCreds = {{ 'true' if saved_creds else 'false' }};
+    const apiModal = document.getElementById('api-modal');
+    const authModal = document.getElementById('auth-modal');
+    const authCredsModal = document.getElementById('auth-creds-modal');
+    const apiForm = document.getElementById('api-modal-form');
+    const authForm = document.getElementById('auth-modal-form');
+    const authCredsForm = document.getElementById('auth-creds-modal-form');
+    const apiFileInput = document.getElementById('modal-api-file');
+    const authFileInput = document.getElementById('modal-auth-file');
+    const modalRemember = document.getElementById('modal-remember-creds');
+    const firebaseConfig = {{ firebase_config | tojson }};
+    let orderValues = [];
+    const defaultSelectedFields = ['name', 'sku', 'price'];
+    const facebookTemplateOrder = [
+        'sku',
+        'name',
+        'description',
+        'availability',
+        'condition',
+        'price',
+        'custom_url',
+        'primary_image_url',
+        'brand_name',
+        'inventory_level',
+        'sale_price',
+        'weight',
+    ];
+
+    function reconcileOrder(selectedValues) {
+        orderValues = orderValues.filter(v => selectedValues.includes(v));
+        selectedValues.forEach(v => {
+            if (!orderValues.includes(v)) orderValues.push(v);
+        });
+    }
+
+    function renderOrderList() {
+        const selectedValues = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+        reconcileOrder(selectedValues);
+        orderedFieldsInput.value = orderValues.join(',');
+
+        orderList.innerHTML = '';
+        orderValues.forEach((val, index) => {
+            const cb = Array.from(checkboxes).find(c => c.value === val);
+            const labelSpan = cb ? cb.parentElement.querySelector('span') : null;
+            const labelText = labelSpan ? labelSpan.textContent.trim() : val;
+
+            const item = document.createElement('div');
+            item.className = 'order-item';
+            item.dataset.index = index;
+            item.dataset.value = val;
+            item.draggable = true;
+
+            const idxEl = document.createElement('span');
+            idxEl.className = 'order-index';
+            idxEl.textContent = index + 1;
+            item.appendChild(idxEl);
+
+            const label = document.createElement('span');
+            label.textContent = labelText;
+            item.appendChild(label);
+
+            item.addEventListener('dragstart', (e) => {
+                item.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', index.toString());
+            });
+            item.addEventListener('dragend', () => {
+                item.classList.remove('dragging');
+                item.classList.remove('drag-over');
+            });
+            item.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                item.classList.add('drag-over');
+            });
+            item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+                item.classList.remove('drag-over');
+                const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                const to = parseInt(item.dataset.index, 10);
+                if (Number.isNaN(from) || Number.isNaN(to) || from === to) return;
+                const newOrder = [...orderValues];
+                const [moved] = newOrder.splice(from, 1);
+                newOrder.splice(to, 0, moved);
+                orderValues = newOrder;
+                orderedFieldsInput.value = orderValues.join(',');
+                renderOrderList();
+            });
+
+            orderList.appendChild(item);
+        });
+
+        renderPreview(orderValues);
+        toggleCustomDomainField();
+    }
+
+    resetBtn.addEventListener('click', () => {
+        checkboxes.forEach(cb => cb.checked = false);
+        orderValues = [];
+        orderedFieldsInput.value = '';
+        orderList.innerHTML = '';
+        renderPreview([]);
+        toggleCustomDomainField();
+    });
+
+    document.getElementById('fb-template-btn').addEventListener('click', () => {
+        const available = new Set(Array.from(checkboxes).map(cb => cb.value));
+        checkboxes.forEach(cb => cb.checked = false);
+        orderValues = facebookTemplateOrder.filter(val => available.has(val));
+        checkboxes.forEach(cb => {
+            if (orderValues.includes(cb.value)) cb.checked = true;
+        });
+        orderedFieldsInput.value = orderValues.join(',');
+        renderOrderList();
+    });
+
+    checkboxes.forEach(cb => cb.addEventListener('change', () => {
+        renderOrderList();
+        toggleCustomDomainField();
+    }));
+    renderOrderList();
+
+    function renderPreview(orderValues) {
+        tabPreview.innerHTML = '';
+        if (!orderValues.length) {
+            tabPreview.innerHTML = '<span class="tab-placeholder">No fields selected yet.</span>';
+            return;
+        }
+        orderValues.forEach((val, idx) => {
+            const cb = Array.from(checkboxes).find(c => c.value === val);
+            const labelSpan = cb ? cb.parentElement.querySelector('span') : null;
+            const labelText = labelSpan ? labelSpan.textContent.trim() : val;
+            const chip = document.createElement('div');
+            chip.className = 'tab-chip';
+            const indexEl = document.createElement('span');
+            indexEl.className = 'index';
+            indexEl.textContent = idx + 1;
+            chip.appendChild(indexEl);
+            const text = document.createElement('span');
+            text.textContent = labelText;
+            chip.appendChild(text);
+            tabPreview.appendChild(chip);
+        });
+    }
+
+    function toggleCustomDomainField() {
+        const customChecked = Array.from(checkboxes).some(cb => cb.value === 'custom_url' && cb.checked);
+        customDomainWrapper.style.display = customChecked ? 'flex' : 'none';
+        if (!customChecked) {
+            customDomainInput.value = '';
+        }
+    }
+
+    function unlockBuilder() {
+        if (selectionShell) {
+            selectionShell.style.display = 'block';
+        }
+        if (builderSection) {
+            builderSection.style.display = 'grid';
+        }
+        if (gateCard) {
+            gateCard.style.display = 'none';
+        }
+        const selectedValues = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+        if (!selectedValues.length) {
+            // Default a couple of fields to reduce empty state friction.
+            defaultSelectedFields.forEach(val => {
+                const cb = Array.from(checkboxes).find(c => c.value === val);
+                if (cb) cb.checked = true;
+            });
+            renderOrderList();
+        }
+        builderSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    if (hasSessionCreds) {
+        unlockBuilder();
+    }
+    if (ctaApi) ctaApi.addEventListener('click', () => openModal(apiModal));
+    if (ctaAuth) ctaAuth.addEventListener('click', () => openModal(authModal));
+
+    // Modal helpers
+    function openModal(el) {
+        if (el) el.style.display = 'flex';
+    }
+    function closeModal(el) {
+        if (el) el.style.display = 'none';
+    }
+    document.querySelectorAll('[data-close]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-close');
+            const el = document.getElementById(id);
+            closeModal(el);
+        });
+    });
+    [apiModal, authModal].forEach(el => {
+        if (!el) return;
+        el.addEventListener('click', (e) => {
+            if (e.target === el) closeModal(el);
+        });
+    });
+
+    function applyCreds(store, client, token) {
+        if (store) storeHashInput.value = store;
+        if (client) clientIdInput.value = client;
+        if (token) accessTokenInput.value = token;
+    }
+
+    function parseCredsFile(text) {
+        // Accept lines like "ACCESS TOKEN: value" and API PATH containing store hash.
+        const clean = (val) => {
+            if (!val) return '';
+            let v = val.trim();
+            // Strip wrapping braces from placeholders like {STORE_HASH}
+            if (v.startsWith('{') && v.endsWith('}')) {
+                v = v.slice(1, -1);
+            }
+            return v;
+        };
+        const lines = text.replace(/\r/g, '\n').split('\n').map(l => l.trim()).filter(Boolean);
+        let store = '';
+        let client = '';
+        let token = '';
+        lines.forEach(line => {
+            const [keyRaw, ...rest] = line.split(':');
+            if (!keyRaw || !rest.length) return;
+            const key = keyRaw.trim().toLowerCase();
+            const value = clean(rest.join(':'));
+            if (key.startsWith('access token')) token = value;
+            if (key.startsWith('client id')) client = value;
+            if (key.startsWith('api path')) {
+                const match = value.match(/stores\/([^/]+)/i);
+                if (match) store = clean(match[1]);
+            }
+            if (key === 'store hash') store = value;
+        });
+        return { store, client, token };
+    }
+
+    document.getElementById('api-continue').addEventListener('click', () => {
+        const store = document.getElementById('modal-store-hash').value.trim();
+        const client = document.getElementById('modal-client-id').value.trim();
+        const token = document.getElementById('modal-access-token').value.trim();
+        if (!store || !client || !token) {
+            alert('Please fill store hash, client ID, and access token.');
+            return;
+        }
+        applyCreds(store, client, token);
+        closeModal(apiModal);
+        unlockBuilder();
+    });
+
+    apiFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const text = await file.text();
+        const parsed = parseCredsFile(text);
+        if (parsed.store) document.getElementById('modal-store-hash').value = parsed.store;
+        if (parsed.client) document.getElementById('modal-client-id').value = parsed.client;
+        if (parsed.token) document.getElementById('modal-access-token').value = parsed.token;
+    });
+
+    document.getElementById('auth-continue').addEventListener('click', () => {
+        const store = document.getElementById('modal-auth-store-hash').value.trim();
+        const client = document.getElementById('modal-auth-client-id').value.trim();
+        const token = document.getElementById('modal-auth-access-token').value.trim();
+        if (!store || !client || !token) {
+            alert('Please fill store hash, client ID, and access token.');
+            return;
+        }
+        applyCreds(store, client, token);
+        if (modalRemember && modalRemember.checked) {
+            saveCredsRemote(store, client, token);
+        }
+        closeModal(authCredsModal);
+        unlockBuilder();
+    });
+
+    authFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const text = await file.text();
+        const parsed = parseCredsFile(text);
+        if (parsed.store) document.getElementById('modal-auth-store-hash').value = parsed.store;
+        if (parsed.client) document.getElementById('modal-auth-client-id').value = parsed.client;
+        if (parsed.token) document.getElementById('modal-auth-access-token').value = parsed.token;
+    });
+
+    async function getIdToken() {
+        if (!window._firebaseAuth || !window._firebaseAuth.getIdToken) return null;
+        try {
+            return await window._firebaseAuth.getIdToken();
+        } catch {
+            return null;
+        }
+    }
+
+    async function loadCredsRemote() {
+        const token = await getIdToken();
+        if (!token) return;
+        const resp = await fetch('/api/load_creds', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_token: token }),
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.status === 'found') {
+            applyCreds(data.store_hash, data.client_id, data.access_token);
+            const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+            setVal('modal-auth-store-hash', data.store_hash || '');
+            setVal('modal-auth-client-id', data.client_id || '');
+            setVal('modal-auth-access-token', data.access_token || '');
+        }
+    }
+
+    async function saveCredsRemote(store, client, token) {
+        const idToken = await getIdToken();
+        if (!idToken) return;
+        await fetch('/api/save_creds', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_token: idToken,
+                store_hash: store,
+                client_id: client,
+                access_token: token,
+            }),
+        });
+    }
+    window.loadCredsRemote = loadCredsRemote;
+    window.saveCredsRemote = saveCredsRemote;
+
+    // Inline auth for modal (uses same Firebase instance if available)
+    const modalAuthStatus = document.getElementById('auth-modal-status');
+    const modalAuthEmail = document.getElementById('modal-auth-email');
+    const modalAuthPassword = document.getElementById('modal-auth-password');
+    const modalAuthSignin = document.getElementById('modal-auth-signin');
+
+    modalAuthSignin.addEventListener('click', async () => {
+        if (!firebaseConfig.apiKey) {
+            alert('Firebase not configured.');
+            return;
+        }
+        if (!window._firebaseAuth) {
+            alert('Auth not ready yet. Please wait a second.');
+            return;
+        }
+        const email = modalAuthEmail.value.trim();
+        const pass = modalAuthPassword.value.trim();
+        if (!email || !pass) {
+            alert('Enter email and password');
+            return;
+        }
+        try {
+            await window._firebaseAuth.signInWithEmailAndPassword(email, pass);
+        } catch (err) {
+            if (err.code && err.code.includes('user-not-found')) {
+                await window._firebaseAuth.createUserWithEmailAndPassword(email, pass);
+            } else if (err.code && err.code.includes('wrong-password')) {
+                alert('Wrong password');
+                return;
+            } else {
+                alert(err.message);
+                return;
+            }
+        }
+        modalAuthStatus.textContent = 'Signed in';
+        closeModal(authModal);
+        openModal(authCredsModal);
+        await loadCredsRemote();
+    });
+
+    // Expose minimal firebase auth on window for modal reuse
+    window._firebaseReady = false;
+
+    // Firebase auth (optional) + local credential storage
+    if (firebaseConfig.apiKey) {
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.innerHTML = `
+            import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+            import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+            const firebaseConfig = {{ firebase_config | tojson }};
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            window._firebaseAuth = {
+                signInWithEmailAndPassword: (e,p) => signInWithEmailAndPassword(auth,e,p),
+                createUserWithEmailAndPassword: (e,p) => createUserWithEmailAndPassword(auth,e,p),
+                signOut: () => signOut(auth),
+                currentUser: () => auth.currentUser,
+                getIdToken: async () => auth.currentUser ? auth.currentUser.getIdToken() : null,
+            };
+            const statusEl = document.getElementById('auth-status') || document.getElementById('auth-modal-status');
+            const storeInput = document.querySelector('input[name="store_hash"]');
+            const clientInput = document.querySelector('input[name="client_id"]');
+            const tokenInput = document.querySelector('input[name="access_token"]');
+            const loadSaved = (uid) => {
+                const stored = localStorage.getItem('bc-creds-' + uid);
+                if (!stored) return;
+                try {
+                    const parsed = JSON.parse(stored);
+                    if (storeInput) storeInput.value = parsed.store_hash || '';
+                    if (clientInput) clientInput.value = parsed.client_id || '';
+                    if (tokenInput) tokenInput.value = parsed.access_token || '';
+                } catch {}
+            };
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    if (statusEl) statusEl.textContent = 'Signed in';
+                    if (statusEl) statusEl.className = 'badge';
+                    loadSaved(user.uid);
+                    if (window.unlockBuilder) unlockBuilder();
+                    if (window.loadCredsRemote) window.loadCredsRemote();
+                } else {
+                    if (statusEl) statusEl.textContent = 'Signed out';
+                    if (statusEl) statusEl.className = 'badge';
+                }
+            });
+        `;
+        document.body.appendChild(script);
+    }
+</script>
+{% endblock %}

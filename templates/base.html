@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product CSV Exporter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #0b1224;
+            --card: #0f1b36;
+            --accent: #6a9bff;
+            --accent-2: #7c5dff;
+            --text: #e8ecf7;
+            --muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.08);
+            --success: #16c782;
+            --warning: #f7b731;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+            background: radial-gradient(circle at 10% 10%, rgba(108, 99, 255, 0.12), transparent 30%),
+                        radial-gradient(circle at 90% 10%, rgba(111, 201, 255, 0.12), transparent 30%),
+                        radial-gradient(circle at 80% 80%, rgba(94, 234, 212, 0.08), transparent 25%),
+                        var(--bg);
+            color: var(--text);
+        }
+        a { color: inherit; text-decoration: none; }
+        main.container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        header.nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            backdrop-filter: blur(6px);
+            z-index: 10;
+        }
+        .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.4px; }
+        .brand-mark {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            display: grid;
+            place-items: center;
+            color: #0b1020;
+            font-weight: 800;
+            font-size: 15px;
+        }
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .layout-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        }
+        h1, h2, h3, h4 { margin: 0 0 8px; }
+        p { margin: 0 0 12px; color: var(--muted); }
+        .muted { color: var(--muted); }
+        .pill-list { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+        label.field-pill {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.02);
+            transition: border 0.2s, background 0.2s;
+        }
+        label.field-pill:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.04); }
+        .order-list { display: flex; flex-direction: column; gap: 8px; }
+        .order-item {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px dashed var(--border);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            cursor: grab;
+        }
+        .order-item.dragging { opacity: 0.65; border-style: solid; }
+        .order-item.drag-over { border-color: var(--accent); background: rgba(106, 155, 255, 0.08); }
+        .order-item span { flex: 1}
+        button, .btn {
+            cursor: pointer;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 12px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            color: #0b0f1d;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            transition: transform 0.15s ease, box-shadow 0.2s;
+        }
+        button.secondary, .btn.secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 20px rgba(0,0,0,0.2); }
+        input[type="checkbox"] { accent-color: var(--accent); transform: scale(1.05); }
+        .table-container {
+            max-height: 70vh;
+            overflow: auto;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        th { position: sticky; top: 0; background: rgba(15, 27, 54, 0.98); text-align: left; }
+        th, td { white-space: nowrap; }
+        td { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+        .hero { display: flex; flex-direction: column; gap: 14px; padding: 20px 0; }
+        .metrics { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+        .metric-card { padding: 14px 16px; border-radius: 14px; background: linear-gradient(135deg, rgba(106,155,255,0.2), rgba(124,93,255,0.2)); border: 1px solid var(--border); }
+        .metric-value { font-size: 20px; font-weight: 700; color: var(--text); }
+        .metric-label { color: var(--muted); font-size: 13px; }
+        .divider { height: 1px; background: var(--border); margin: 18px 0; }
+        .stack { display: flex; flex-direction: column; gap: 12px; }
+        .inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .badge { padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+        .filter-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+        .toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.03);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+        }
+        .toggle input[type="checkbox"] { margin: 0; }
+        .tab-preview {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            min-height: 40px;
+        }
+        .tab-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.04);
+            font-size: 13px;
+            color: var(--text);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+        .tab-chip .index {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border-radius: 6px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            color: #0b0f1d;
+            font-weight: 700;
+            font-size: 11px;
+            text-align: center;
+            line-height: 18px;
+        }
+        .tab-placeholder { color: var(--muted); }
+        .order-index {
+            display: inline-block;
+            min-width: 14px;
+            height: 16px;
+            padding: 0 3px;
+            border-radius: 4px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            color: #0b0f1d;
+            font-weight: 700;
+            font-size: 10px;
+            text-align: center;
+            line-height: 16px;
+        }
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .modal {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            width: min(520px, 92vw);
+            box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; }
+        .close-btn { cursor: pointer; border: none; background: none; color: var(--muted); font-size: 20px; }
+    </style>
+</head>
+<body>
+    <header class="nav">
+        <div class="brand">
+            <div class="brand-mark">BC</div>
+            <div>Catalog Pilot</div>
+        </div>
+        <div class="inline" style="justify-content: flex-end;">
+            <div class="tag">CSV Export · BigCommerce</div>
+            <button type="button" class="secondary" id="logout-btn">Logout</button>
+        </div>
+    </header>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        (() => {
+            const logoutBtn = document.getElementById('logout-btn');
+            const clearCredentialInputs = () => {
+                [
+                    'store_hash_field',
+                    'client_id_field',
+                    'access_token_field',
+                    'modal-store-hash',
+                    'modal-client-id',
+                    'modal-access-token',
+                    'modal-auth-store-hash',
+                    'modal-auth-client-id',
+                    'modal-auth-access-token',
+                ].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                ['modal-api-file', 'modal-auth-file'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+            };
+            const clearLocalCache = (uid) => {
+                if (!uid) return;
+                try {
+                    localStorage.removeItem('bc-creds-' + uid);
+                } catch (err) {
+                    console.warn('Unable to clear cached creds', err);
+                }
+            };
+            const clearServerSession = async () => {
+                try {
+                    await fetch('/logout', { method: 'POST', credentials: 'same-origin' });
+                } catch (err) {
+                    console.warn('Logout request failed', err);
+                }
+            };
+            const handleLogout = async () => {
+                const authApi = window._firebaseAuth;
+                const user = authApi && typeof authApi.currentUser === 'function' ? authApi.currentUser() : null;
+                if (user && user.uid) {
+                    clearLocalCache(user.uid);
+                    if (typeof authApi.signOut === 'function') {
+                        try {
+                            await authApi.signOut();
+                        } catch (err) {
+                            console.warn('Firebase sign-out failed', err);
+                        }
+                    }
+                }
+                clearCredentialInputs();
+                await clearServerSession();
+                window.location.href = '/';
+            };
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', handleLogout);
+            }
+            window._logoutHandlers = { handleLogout };
+        })();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

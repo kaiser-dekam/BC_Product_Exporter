@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero" style="padding-bottom: 12px;">
+    <div class="layout-grid" style="grid-template-columns: 2fr 1fr;">
+        <div>
+            <h1>Export ready</h1>
+            <p class="muted">Your CSV is ready. Review it below or download instantly.</p>
+            <div class="inline">
+                <a class="btn" href="{{ url_for('download', fields=fields, include_variants=include_variants, include_unavailable=include_unavailable, include_hidden=include_hidden, custom_domain=custom_domain) }}">Download CSV</a>
+                <a class="btn secondary" href="{{ url_for('index') }}">Start over</a>
+            </div>
+        </div>
+        <div class="layout-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+            <div class="metric-card">
+                <div class="metric-value">{{ preview_rows|length - 1 if preview_rows else 0 }}</div>
+                <div class="metric-label">Rows (products)</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ preview_rows[0]|length if preview_rows else 0 }}</div>
+                <div class="metric-label">Columns selected</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{% if include_variants %}On{% else %}Off{% endif %}</div>
+                <div class="metric-label">Variants included</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="inline" style="justify-content: space-between; align-items: center;">
+        <div>
+            <h3>CSV Preview</h3>
+            <p class="muted">Scrollable preview with headers fixed for quick checks.</p>
+        </div>
+        <span class="badge">Preview only</span>
+    </div>
+    <div class="divider"></div>
+    {% if preview_rows %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    {% for cell in preview_rows[0] %}
+                    <th>{{ cell }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in preview_rows[1:] %}
+                <tr>
+                    {% for cell in row %}
+                    <td>{{ cell }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No rows to preview.</p>
+    {% endif %}
+</section>
+{% endblock %}
