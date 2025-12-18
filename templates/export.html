@@ -7,7 +7,7 @@
             <p class="muted">Your CSV is ready. Review it below or download instantly.</p>
             <div class="inline">
                 <a class="btn" href="{{ url_for('download', fields=fields, include_variants=include_variants, include_unavailable=include_unavailable, include_hidden=include_hidden, custom_domain=custom_domain) }}">Download CSV</a>
-                <a class="btn secondary" href="{{ url_for('index') }}">Start over</a>
+                <a class="btn secondary" href="{{ url_for('index') }}">Go Back</a>
             </div>
         </div>
         <div class="layout-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
