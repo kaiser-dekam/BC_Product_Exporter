@@ -5,10 +5,10 @@
     <input type="hidden" name="store_hash" id="store_hash_field" value="{{ saved_creds.get('store_hash', '') }}">
     <input type="hidden" name="client_id" id="client_id_field" value="{{ saved_creds.get('client_id', '') }}">
     <input type="hidden" name="access_token" id="access_token_field" value="{{ saved_creds.get('access_token', '') }}">
-    <section class="card" style="margin-bottom: 14px;">
+    <section class="card" id="hero-section" style="margin-bottom: 14px;">
         <div class="layout-grid" style="grid-template-columns: 1.6fr 1fr; align-items: center;">
             <div>
-                <h1 style="margin-bottom: 10px;">Export-ready product data without the busywork.</h1>
+                <h1 style="margin-bottom: 10px;">Easily export product data into the exact CSV you need.</h1>
                 <p class="muted" style="margin-bottom: 12px;">Connect your BigCommerce store, pick the exact fields (brands, images, variants, pricing, inventory, and more), and export a clean CSV in seconds.</p>
                 <div class="inline">
                     <div class="badge">BigCommerce API</div>
@@ -23,7 +23,7 @@
                 <div class="pill-list" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
                     {% for key, label in field_list[:10] %}
                     <span class="badge">{{ label }}</span>
-                    {% endfor %}
+                    {% endfor %}    
                 </div>
                 <p class="muted" style="margin-top: 8px;">Plus pricing, weights/dimensions, custom fields, images, variants, and more.</p>
             </div>
@@ -42,7 +42,7 @@
                 <p class="muted">Paste your store hash, client ID, and access token to continue.</p>
                 <p class="muted">We recommend Read-Only access and rotate your credentials often.</p>
                 <p class="muted">We never store your credentials, but the ability create an account and save them for the future is coming soon.</p>
-                <button type="button" id="cta-api" class="secondary">Continue with API credentials</button>
+                <button type="button" id="cta-api" >Get Started</button>
             </div>
             <!-- <div class="card" style="background: rgba(255,255,255,0.03);">
                 <h4>Sign in (optional)</h4>
@@ -105,7 +105,7 @@
                 </label>
             </div>
             <div class="inline">
-                <button type="submit">Export CSV</button>
+                <button type="submit" class="export-button">Export CSV</button>
                 <button type="button" class="secondary" id="reset-btn">Reset selection</button>
             </div>
         </section>
@@ -120,10 +120,10 @@
             <h4>Enter API credentials</h4>
             <button type="button" class="close-btn" data-close="api-modal">&times;</button>
         </div>
-        <p class="muted">Paste your BigCommerce credentials to continue.</p>
+        <p class="muted">Upload your BigCommerce API TXT file for easy entry or copy/paste your information to continue.</p>
         <div class="stack" id="api-modal-form">
             <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
-                <span class="muted">Upload BigCommerce credentials txt (optional)</span>
+                <span class="muted">Upload BigCommerce credentials txt (Easiest)</span>
                 <input type="file" id="modal-api-file" accept=".txt">
             </label>
             <label class="field-pill" style="flex-direction: column; align-items: flex-start;">
@@ -138,6 +138,8 @@
                 <span class="muted">Access token</span>
                 <input type="password" id="modal-access-token" placeholder="access_token">
             </label>
+            <p id="data-safe">No information is stored on our servers or in any database. Your information here will be erased when you leave the site.</p>
+            <p id="data-safe">We're too busy running our own BigCommerce store to even attempt to take your data.</p>
             <div class="inline">
                 <button type="button" id="api-continue">Continue</button>
                 <button type="button" class="secondary" data-close="api-modal">Cancel</button>
@@ -221,6 +223,7 @@
     const builderSection = document.getElementById('builder-section');
     const selectionShell = document.getElementById('selection-shell');
     const gateCard = document.getElementById('gate-card');
+    const heroSection = document.getElementById('hero-section');
     const ctaApi = document.getElementById('cta-api');
     const ctaAuth = document.getElementById('cta-auth');
     const hasSessionCreds = {{ 'true' if saved_creds else 'false' }};
@@ -385,6 +388,9 @@
         }
         if (gateCard) {
             gateCard.style.display = 'none';
+        }
+        if (heroSection) {
+            heroSection.style.display = 'none';
         }
         const selectedValues = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
         if (!selectedValues.length) {

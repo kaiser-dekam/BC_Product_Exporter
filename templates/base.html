@@ -82,6 +82,7 @@
         h1, h2, h3, h4 { margin: 0 0 8px; }
         p { margin: 0 0 12px; color: var(--muted); }
         .muted { color: var(--muted); }
+        .emphasize {background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
         .pill-list { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
         label.field-pill {
             display: flex;
@@ -117,6 +118,14 @@
             background: linear-gradient(135deg, var(--accent), var(--accent-2));
             color: #0b0f1d;
             font-weight: 700;
+            width: 150px;
+            letter-spacing: 0.3px;
+            transition: transform 0.15s ease, box-shadow 0.2s;
+        }
+        .export-button {
+            background: linear-gradient(135deg, #16c782, #7c5dff);
+            color: #0b0f1d;
+            font-weight: 700;
             letter-spacing: 0.3px;
             transition: transform 0.15s ease, box-shadow 0.2s;
         }
@@ -148,6 +157,7 @@
         .inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         .badge { padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
         .filter-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+        .filter-bar .toggle { padding: 8px 10px; font-size: 13px; gap: 8px; }
         .toggle {
             display: inline-flex;
             align-items: center;
@@ -159,6 +169,7 @@
             box-shadow: 0 6px 16px rgba(0,0,0,0.2);
         }
         .toggle input[type="checkbox"] { margin: 0; }
+        .filter-bar .toggle input[type="checkbox"] { transform: scale(0.95); }
         .tab-preview {
             display: flex;
             gap: 10px;
@@ -223,8 +234,22 @@
         }
         .modal-header { display: flex; justify-content: space-between; align-items: center; }
         .close-btn { cursor: pointer; border: none; background: none; color: var(--muted); font-size: 20px; }
+        #data-safe {
+            font-size: 10px;
+            color: var(--muted);
+            margin-bottom: 12px;
+        }
     </style>
 </head>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-HP93TXCSGQ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-HP93TXCSGQ');
+</script>
 <body>
     <header class="nav">
         <div class="brand">
