@@ -24,7 +24,7 @@ Then open http://localhost:5000.
 
 ## Usage
 - Check the fields you want in the left column, reorder them with the arrows, and click **Export CSV**.
-- Toggle **Include variant data** if you need variant SKUs/prices/details (slightly slower because of the extra API include).
+- Toggle **Include variant data** if you need variant SKUs/prices/details (slower because each product's variants are paginated).
 - The next page previews the CSV and offers a **Download CSV** button.
 
 ## Notes

@@ -132,7 +132,7 @@ def fetch_products(
     # triggers 422 on some stores, so avoid adding it to includes.
     include_params = ["images", "primary_image", "custom_fields"]
     if include_variants:
-        include_params.extend(["variants", "options", "modifiers"])
+        include_params.extend(["options", "modifiers"])
 
     all_products: List[Dict] = []
     page = 1
@@ -152,11 +152,69 @@ def fetch_products(
         if not data:
             break
         all_products.extend(data)
-        if len(data) < page_size:
+
+        pagination = (payload.get("meta") or {}).get("pagination") or {}
+        total_pages = pagination.get("total_pages")
+        current_page = pagination.get("current_page", page)
+        if total_pages and current_page >= total_pages:
+            break
+        if not total_pages and len(data) < page_size:
             break
         page += 1
 
-    return all_products[:max_items]
+    products = all_products[:max_items]
+    if include_variants:
+        for product in products:
+            product_id = product.get("id")
+            if not product_id:
+                continue
+            product["variants"] = fetch_variants_for_product(
+                product_id, config_override=config_override
+            )
+
+    return products
+
+
+def fetch_variants_for_product(
+    product_id: int,
+    config_override: Dict[str, str] | None = None,
+    page_size: int = 250,
+) -> List[Dict]:
+    """Fetch all variants for a single product with pagination."""
+    config = get_bigcommerce_config(config_override)
+    base_url = f"https://api.bigcommerce.com/stores/{config['store_hash']}/v3"
+    endpoint = f"{base_url}/catalog/products/{product_id}/variants"
+    headers = {
+        "X-Auth-Client": config["client_id"],
+        "X-Auth-Token": config["access_token"],
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    variants: List[Dict] = []
+    page = 1
+    while True:
+        params = {"limit": page_size, "page": page}
+        response = requests.get(endpoint, headers=headers, params=params, timeout=30)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"BigCommerce variants API error ({response.status_code}): {response.text}"
+            )
+        payload = response.json()
+        data = payload.get("data", [])
+        if not data:
+            break
+        variants.extend(data)
+
+        pagination = (payload.get("meta") or {}).get("pagination") or {}
+        total_pages = pagination.get("total_pages")
+        current_page = pagination.get("current_page", page)
+        if total_pages and current_page >= total_pages:
+            break
+        if not total_pages and len(data) < page_size:
+            break
+        page += 1
+
+    return variants
 
 
 def filter_products(
