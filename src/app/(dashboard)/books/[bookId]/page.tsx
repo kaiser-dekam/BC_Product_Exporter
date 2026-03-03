@@ -1,0 +1,402 @@
+"use client";
+
+import { useState, useCallback, useEffect, use } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import Card from "@/components/ui/Card";
+import Button from "@/components/ui/Button";
+import Input from "@/components/ui/Input";
+import Spinner from "@/components/ui/Spinner";
+import SectionEditor from "@/components/books/SectionEditor";
+import ProductPicker from "@/components/books/ProductPicker";
+import ExportPdfButton from "@/components/pdf/ExportPdfButton";
+
+interface BookProduct {
+  product_cache_id: string;
+  name: string;
+  sku: string;
+  price: number;
+  primary_image_url: string;
+  claude_summary: string | null;
+}
+
+interface BookSection {
+  id: string;
+  title: string;
+  products: BookProduct[];
+}
+
+interface BookData {
+  id: string;
+  title: string;
+  description: string;
+  status: "draft" | "published";
+  sections: BookSection[];
+  cover_config: {
+    background_color: string;
+    title_font_size: number;
+    subtitle: string;
+    logo_url: string | null;
+  };
+}
+
+export default function BookEditorPage({
+  params,
+}: {
+  params: Promise<{ bookId: string }>;
+}) {
+  const { bookId } = use(params);
+  const { getIdToken } = useAuth();
+  const router = useRouter();
+
+  const [book, setBook] = useState<BookData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSectionId, setPickerSectionId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  // Load book
+  const fetchBook = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/books/${bookId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error("Book not found");
+      const data = await res.json();
+      setBook(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load book");
+    } finally {
+      setLoading(false);
+    }
+  }, [getIdToken, bookId]);
+
+  useEffect(() => {
+    fetchBook();
+  }, [fetchBook]);
+
+  // Save book
+  const saveBook = useCallback(async (updatedBook: BookData) => {
+    setSaving(true);
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/books/${bookId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: updatedBook.title,
+          description: updatedBook.description,
+          status: updatedBook.status,
+          sections: updatedBook.sections,
+          cover_config: updatedBook.cover_config,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to save");
+      setSaveMessage("Saved!");
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(false);
+    }
+  }, [getIdToken, bookId]);
+
+  // Add section
+  const addSection = useCallback(() => {
+    if (!book) return;
+    const newSection: BookSection = {
+      id: `section_${Date.now()}`,
+      title: "New Section",
+      products: [],
+    };
+    const updated = { ...book, sections: [...book.sections, newSection] };
+    setBook(updated);
+    saveBook(updated);
+  }, [book, saveBook]);
+
+  // Remove section
+  const removeSection = useCallback((sectionId: string) => {
+    if (!book) return;
+    const updated = {
+      ...book,
+      sections: book.sections.filter((s) => s.id !== sectionId),
+    };
+    setBook(updated);
+    saveBook(updated);
+  }, [book, saveBook]);
+
+  // Rename section
+  const renameSection = useCallback((sectionId: string, newTitle: string) => {
+    if (!book) return;
+    const updated = {
+      ...book,
+      sections: book.sections.map((s) =>
+        s.id === sectionId ? { ...s, title: newTitle } : s
+      ),
+    };
+    setBook(updated);
+    // Don't auto-save on every keystroke — save on blur would be better
+    // but for simplicity we debounce through a separate save button
+  }, [book]);
+
+  // Remove product from section
+  const removeProduct = useCallback((sectionId: string, productCacheId: string) => {
+    if (!book) return;
+    const updated = {
+      ...book,
+      sections: book.sections.map((s) =>
+        s.id === sectionId
+          ? { ...s, products: s.products.filter((p) => p.product_cache_id !== productCacheId) }
+          : s
+      ),
+    };
+    setBook(updated);
+    saveBook(updated);
+  }, [book, saveBook]);
+
+  // Open product picker for a section
+  const openProductPicker = useCallback((sectionId: string) => {
+    setPickerSectionId(sectionId);
+    setPickerOpen(true);
+  }, []);
+
+  // Add products from picker
+  const handleAddProducts = useCallback(
+    (products: Array<{ id: string; name: string; sku: string; price: number; primary_image_url: string; claude_summary: string | null }>) => {
+      if (!book || !pickerSectionId) return;
+      const newProducts: BookProduct[] = products.map((p) => ({
+        product_cache_id: p.id,
+        name: p.name,
+        sku: p.sku,
+        price: p.price,
+        primary_image_url: p.primary_image_url,
+        claude_summary: p.claude_summary,
+      }));
+
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === pickerSectionId
+            ? { ...s, products: [...s.products, ...newProducts] }
+            : s
+        ),
+      };
+      setBook(updated);
+      saveBook(updated);
+    },
+    [book, pickerSectionId, saveBook]
+  );
+
+  // Drag and drop section reorder
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !book) return;
+
+    const oldIndex = book.sections.findIndex((s) => s.id === active.id);
+    const newIndex = book.sections.findIndex((s) => s.id === over.id);
+
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const updated = {
+      ...book,
+      sections: arrayMove(book.sections, oldIndex, newIndex),
+    };
+    setBook(updated);
+    saveBook(updated);
+  }, [book, saveBook]);
+
+  // Get all existing product IDs in the current picker section
+  const existingProductIds = pickerSectionId && book
+    ? book.sections
+        .find((s) => s.id === pickerSectionId)
+        ?.products.map((p) => p.product_cache_id) || []
+    : [];
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (!book) {
+    return (
+      <Card className="max-w-2xl mx-auto text-center py-12">
+        <h2 className="text-lg font-semibold mb-2">Book Not Found</h2>
+        <p className="text-muted text-sm mb-4">This book doesn&apos;t exist or you don&apos;t have access.</p>
+        <Button onClick={() => router.push("/books")}>Back to Books</Button>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push("/books")}
+            className="text-muted hover:text-text transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div>
+            <input
+              type="text"
+              value={book.title}
+              onChange={(e) => setBook({ ...book, title: e.target.value })}
+              className="text-2xl font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-text w-full"
+              placeholder="Book title..."
+            />
+            <input
+              type="text"
+              value={book.description}
+              onChange={(e) => setBook({ ...book, description: e.target.value })}
+              className="text-sm text-muted bg-transparent border-none focus:outline-none focus:ring-0 w-full mt-1"
+              placeholder="Description (optional)..."
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {saveMessage && <span className="text-sm text-success">{saveMessage}</span>}
+          <ExportPdfButton
+            title={book.title}
+            subtitle={book.cover_config.subtitle}
+            coverColor={book.cover_config.background_color}
+            sections={book.sections}
+          />
+          <Button onClick={() => saveBook(book)} loading={saving} size="sm">
+            Save
+          </Button>
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <Card className="mb-4 border-danger/30 bg-danger/5">
+          <p className="text-sm text-danger">{error}</p>
+        </Card>
+      )}
+
+      {/* Cover Config */}
+      <Card className="mb-6">
+        <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Cover Settings</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Subtitle"
+            value={book.cover_config.subtitle}
+            onChange={(e) =>
+              setBook({
+                ...book,
+                cover_config: { ...book.cover_config, subtitle: e.target.value },
+              })
+            }
+            placeholder="A subtitle for the cover..."
+          />
+          <Input
+            label="Background Color"
+            type="color"
+            value={book.cover_config.background_color}
+            onChange={(e) =>
+              setBook({
+                ...book,
+                cover_config: { ...book.cover_config, background_color: e.target.value },
+              })
+            }
+          />
+        </div>
+      </Card>
+
+      {/* Sections */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-muted uppercase tracking-wider">
+          Sections ({book.sections.length})
+        </h3>
+        <Button size="sm" variant="secondary" onClick={addSection}>
+          + Add Section
+        </Button>
+      </div>
+
+      {book.sections.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center py-12 text-center mb-6">
+          <svg className="w-10 h-10 text-muted/30 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          <p className="text-sm text-muted mb-3">No sections yet. Add a section to start building your book.</p>
+          <Button size="sm" onClick={addSection}>Add First Section</Button>
+        </Card>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={book.sections.map((s) => s.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {book.sections.map((section) => (
+              <SectionEditor
+                key={section.id}
+                id={section.id}
+                title={section.title}
+                products={section.products}
+                onRemoveProduct={removeProduct}
+                onRemoveSection={removeSection}
+                onRenameSection={renameSection}
+                onAddProducts={openProductPicker}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+      )}
+
+      {/* Product Picker Modal */}
+      <ProductPicker
+        open={pickerOpen}
+        onClose={() => {
+          setPickerOpen(false);
+          setPickerSectionId(null);
+        }}
+        onAdd={handleAddProducts}
+        existingProductIds={existingProductIds}
+      />
+    </div>
+  );
+}

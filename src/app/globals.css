@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f172a;
+  --panel: #0b1224;
+  --card: #0f1b36;
+  --accent: #6a9bff;
+  --accent-2: #7c5dff;
+  --text: #e8ecf7;
+  --muted: #94a3b8;
+  --border: rgba(255, 255, 255, 0.08);
+  --success: #16c782;
+  --warning: #f7b731;
+  --danger: #ef4444;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-card: var(--card);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(108, 99, 255, 0.12), transparent 30%),
+    radial-gradient(circle at 90% 10%, rgba(111, 201, 255, 0.12), transparent 30%),
+    radial-gradient(circle at 80% 80%, rgba(94, 234, 212, 0.08), transparent 25%),
+    var(--bg);
+  color: var(--text);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Checkbox accent */
+input[type="checkbox"] {
+  accent-color: var(--accent);
+}

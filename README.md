@@ -1,32 +1,36 @@
-# BigCommerce Product CSV Exporter
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-Small Flask app to pull product data from BigCommerce, pick the fields you need, set their order, and export to CSV (preview + download).
+## Getting Started
 
-## Setup
-1. Python 3.10+ recommended.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Set environment variables (create a `.env` or export directly):
-   ```bash
-   export BIGCOMMERCE_STORE_HASH=your_store_hash
-   export BIGCOMMERCE_CLIENT_ID=your_client_id
-   export BIGCOMMERCE_ACCESS_TOKEN=your_access_token
-   ```
-   The app automatically loads a `.env` file from the project root.
+First, run the development server:
 
-## Run
 ```bash
-flask --app app run --debug
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
-Then open http://localhost:5000.
 
-## Usage
-- Check the fields you want in the left column, reorder them with the arrows, and click **Export CSV**.
-- Toggle **Include variant data** if you need variant SKUs/prices/details (slower because each product's variants are paginated).
-- The next page previews the CSV and offers a **Download CSV** button.
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Notes
-- The app pulls up to 2,000 products using paginated requests (250 per page). Adjust `fetch_products` if you need a different cap or page size.
-- API failures will raise a runtime error; ensure your credentials have `catalog/products` read access.
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
