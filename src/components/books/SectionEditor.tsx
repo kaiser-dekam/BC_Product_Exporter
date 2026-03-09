@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -44,6 +45,7 @@ interface SectionEditorProps {
   onAddHeader: (sectionId: string, level: 1 | 2 | 3) => void;
   onUpdateHeader: (sectionId: string, headerId: string, text: string, level: 1 | 2 | 3) => void;
   onReorderItems: (sectionId: string, items: SectionItem[]) => void;
+  onUpdateProductDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,10 +55,12 @@ function SortableProductRow({
   product,
   sectionId,
   onRemove,
+  onUpdateDescription,
 }: {
   product: ProductItem;
   sectionId: string;
   onRemove: (sectionId: string, itemId: string) => void;
+  onUpdateDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
 }) {
   const {
     attributes,
@@ -67,6 +71,10 @@ function SortableProductRow({
     isDragging,
   } = useSortable({ id: product.product_cache_id });
 
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [draftText, setDraftText] = useState("");
+  const [draftSource, setDraftSource] = useState<"ai" | "custom">("ai");
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -74,58 +82,149 @@ function SortableProductRow({
     zIndex: isDragging ? 10 : undefined,
   };
 
+  const openDescEditor = () => {
+    setDraftText(product.user_description ?? "");
+    setDraftSource(product.description_source ?? (product.claude_summary ? "ai" : "custom"));
+    setEditingDesc(true);
+  };
+
+  const saveDesc = () => {
+    const trimmed = draftText.trim();
+    onUpdateDescription(sectionId, product.product_cache_id, trimmed || null, draftSource);
+    setEditingDesc(false);
+  };
+
+  const activeSource = product.description_source ?? (product.claude_summary ? "ai" : "custom");
+  const hasCustom = !!product.user_description;
+
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-3 p-2 rounded-lg bg-white/5 hover:bg-white/8 transition-colors"
-    >
-      {/* Drag handle */}
-      <button
-        className="cursor-grab text-muted/40 hover:text-muted p-0.5 flex-shrink-0"
-        {...attributes}
-        {...listeners}
-      >
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
-        </svg>
-      </button>
+    <div ref={setNodeRef} style={style}>
+      {/* Main row */}
+      <div className="flex items-center gap-3 p-2 rounded-lg bg-white/5 hover:bg-white/8 transition-colors">
+        {/* Drag handle */}
+        <button
+          className="cursor-grab text-muted/40 hover:text-muted p-0.5 flex-shrink-0"
+          {...attributes}
+          {...listeners}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+          </svg>
+        </button>
 
-      {/* Product image */}
-      <div className="w-10 h-10 rounded bg-white/5 flex-shrink-0 overflow-hidden flex items-center justify-center">
-        {product.primary_image_url ? (
-          <img
-            src={product.primary_image_url}
-            alt={product.name}
-            className="w-full h-full object-contain"
-          />
-        ) : (
-          <span className="text-xs text-muted">No img</span>
-        )}
+        {/* Product image */}
+        <div className="w-10 h-10 rounded bg-white/5 flex-shrink-0 overflow-hidden flex items-center justify-center">
+          {product.primary_image_url ? (
+            <img
+              src={product.primary_image_url}
+              alt={product.name}
+              className="w-full h-full object-contain"
+            />
+          ) : (
+            <span className="text-xs text-muted">No img</span>
+          )}
+        </div>
+
+        {/* Product info */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">
+            {product.name}
+            {product.is_custom && (
+              <span className="ml-1.5 text-[10px] text-muted/60">(custom)</span>
+            )}
+          </p>
+          <p className="text-xs text-muted">
+            {product.sku && `SKU: ${product.sku} · `}${product.price.toFixed(2)}
+          </p>
+        </div>
+
+        {/* Description source badge */}
+        {hasCustom && activeSource === "custom" ? (
+          <Badge variant="warning" className="flex-shrink-0 text-[10px]">Custom</Badge>
+        ) : product.claude_summary ? (
+          <Badge variant="success" className="flex-shrink-0 text-[10px]">AI</Badge>
+        ) : null}
+
+        {/* Edit description button */}
+        <button
+          onClick={openDescEditor}
+          className="text-muted hover:text-accent transition-colors p-1 flex-shrink-0"
+          title="Edit description"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+        </button>
+
+        {/* Remove button */}
+        <button
+          onClick={() => onRemove(sectionId, product.product_cache_id)}
+          className="text-muted hover:text-danger transition-colors p-1"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
-      {/* Product info */}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{product.name}</p>
-        <p className="text-xs text-muted">
-          {product.sku && `SKU: ${product.sku} · `}${product.price.toFixed(2)}
-        </p>
-      </div>
+      {/* Inline description editor */}
+      {editingDesc && (
+        <div className="mt-1 mb-2 rounded-lg border border-border bg-surface/50 p-3">
+          {/* Source toggle */}
+          <div className="flex items-center gap-1 mb-3 bg-surface rounded-lg p-1 w-fit">
+            <button
+              onClick={() => setDraftSource("ai")}
+              className={`px-3 py-1 rounded-md text-xs transition-colors ${
+                draftSource === "ai"
+                  ? "bg-accent text-[#0b0f1d] font-medium"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              AI Summary
+            </button>
+            <button
+              onClick={() => setDraftSource("custom")}
+              className={`px-3 py-1 rounded-md text-xs transition-colors ${
+                draftSource === "custom"
+                  ? "bg-accent text-[#0b0f1d] font-medium"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              Custom
+            </button>
+          </div>
 
-      {/* AI badge */}
-      {product.claude_summary && (
-        <Badge variant="success" className="flex-shrink-0">AI</Badge>
+          {draftSource === "ai" ? (
+            <div className="text-xs text-muted bg-surface rounded-lg p-2.5 min-h-[60px] whitespace-pre-wrap leading-relaxed border border-border/50">
+              {product.claude_summary || "No AI summary available for this product."}
+            </div>
+          ) : (
+            <div>
+              <textarea
+                value={draftText}
+                onChange={(e) => setDraftText(e.target.value)}
+                className="w-full text-xs bg-surface border border-border rounded-lg p-2.5 text-text resize-none focus:outline-none focus:ring-1 focus:ring-accent leading-relaxed"
+                rows={5}
+                placeholder="Enter custom description… (use - for bullet points)"
+                autoFocus
+              />
+              {product.claude_summary && (
+                <button
+                  onClick={() => setDraftText(product.claude_summary!)}
+                  className="mt-1 text-xs text-muted hover:text-accent transition-colors"
+                >
+                  ↓ Fill from AI Summary
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 mt-3">
+            <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)}>Cancel</Button>
+            <Button size="sm" onClick={saveDesc}>Save</Button>
+          </div>
+        </div>
       )}
-
-      {/* Remove button */}
-      <button
-        onClick={() => onRemove(sectionId, product.product_cache_id)}
-        className="text-muted hover:text-danger transition-colors p-1"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
     </div>
   );
 }
@@ -241,6 +340,7 @@ export default function SectionEditor({
   onAddHeader,
   onUpdateHeader,
   onReorderItems,
+  onUpdateProductDescription,
 }: SectionEditorProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id });
@@ -371,6 +471,7 @@ export default function SectionEditor({
                           product={item}
                           sectionId={id}
                           onRemove={onRemoveItem}
+                          onUpdateDescription={onUpdateProductDescription}
                         />
                       ) : (
                         <SortableHeaderRow
