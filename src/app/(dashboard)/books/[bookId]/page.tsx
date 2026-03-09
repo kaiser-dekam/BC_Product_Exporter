@@ -60,6 +60,7 @@ interface BookSection {
   id: string;
   title: string;
   items: SectionItem[];
+  layout?: "1-col" | "2-col";
 }
 
 interface BookData {
@@ -86,6 +87,7 @@ function migrateSections(
   return rawSections.map((s) => ({
     id: s.id,
     title: s.title,
+    layout: (s.layout as "1-col" | "2-col") ?? "1-col",
     items: s.items
       ? // New format — items already tagged with `type`
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -358,6 +360,24 @@ export default function BookEditorPage({
   );
 
   // -----------------------------------------------------------------------
+  // Section layout
+  // -----------------------------------------------------------------------
+  const updateSectionLayout = useCallback(
+    (sectionId: string, layout: "1-col" | "2-col") => {
+      if (!book) return;
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId ? { ...s, layout } : s
+        ),
+      };
+      setBook(updated);
+      saveBook(updated);
+    },
+    [book, saveBook]
+  );
+
+  // -----------------------------------------------------------------------
   // Product picker
   // -----------------------------------------------------------------------
   const openProductPicker = useCallback((sectionId: string) => {
@@ -588,6 +608,7 @@ export default function BookEditorPage({
                 id={section.id}
                 title={section.title}
                 items={section.items}
+                layout={section.layout ?? "1-col"}
                 collapsed={collapsedSections.has(section.id)}
                 onToggleCollapse={toggleCollapse}
                 onRemoveItem={removeItem}
@@ -599,6 +620,7 @@ export default function BookEditorPage({
                 onUpdateHeader={updateHeader}
                 onReorderItems={reorderItems}
                 onUpdateProductDescription={updateProductDescription}
+                onUpdateLayout={updateSectionLayout}
               />
             ))}
           </SortableContext>

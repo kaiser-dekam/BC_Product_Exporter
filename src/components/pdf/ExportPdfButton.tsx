@@ -8,6 +8,7 @@ interface BookSection {
   id: string;
   title: string;
   items: SectionItem[];
+  layout?: "1-col" | "2-col";
 }
 
 interface ExportPdfButtonProps {

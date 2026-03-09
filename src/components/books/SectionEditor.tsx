@@ -35,6 +35,7 @@ interface SectionEditorProps {
   id: string;
   title: string;
   items: SectionItem[];
+  layout: "1-col" | "2-col";
   collapsed: boolean;
   onToggleCollapse: (sectionId: string) => void;
   onRemoveItem: (sectionId: string, itemId: string) => void;
@@ -46,6 +47,7 @@ interface SectionEditorProps {
   onUpdateHeader: (sectionId: string, headerId: string, text: string, level: 1 | 2 | 3) => void;
   onReorderItems: (sectionId: string, items: SectionItem[]) => void;
   onUpdateProductDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
+  onUpdateLayout: (sectionId: string, layout: "1-col" | "2-col") => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +332,7 @@ export default function SectionEditor({
   id,
   title,
   items,
+  layout,
   collapsed,
   onToggleCollapse,
   onRemoveItem,
@@ -341,6 +344,7 @@ export default function SectionEditor({
   onUpdateHeader,
   onReorderItems,
   onUpdateProductDescription,
+  onUpdateLayout,
 }: SectionEditorProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id });
@@ -418,6 +422,28 @@ export default function SectionEditor({
             {productCount} {productCount === 1 ? "product" : "products"}
             {headerCount > 0 && ` · ${headerCount} ${headerCount === 1 ? "header" : "headers"}`}
           </span>
+
+          {/* Layout toggle */}
+          <div className="flex items-center gap-0.5 bg-surface border border-border rounded-lg p-0.5 flex-shrink-0">
+            <button
+              onClick={() => onUpdateLayout(id, "1-col")}
+              className={`px-2 py-0.5 rounded text-xs transition-colors ${
+                layout === "1-col" ? "bg-accent text-[#0b0f1d] font-medium" : "text-muted hover:text-text"
+              }`}
+              title="Single column"
+            >
+              1 Col
+            </button>
+            <button
+              onClick={() => onUpdateLayout(id, "2-col")}
+              className={`px-2 py-0.5 rounded text-xs transition-colors ${
+                layout === "2-col" ? "bg-accent text-[#0b0f1d] font-medium" : "text-muted hover:text-text"
+              }`}
+              title="Two columns"
+            >
+              2 Col
+            </button>
+          </div>
 
           <Button size="sm" variant="ghost" onClick={() => onAddProducts(id)}>
             + Add

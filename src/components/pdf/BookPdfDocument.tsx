@@ -52,6 +52,18 @@ const BULLET_LINE_HEIGHT = 6; // pt absolute
 // Max characters per bullet (matches AI prompt constraint of 90 chars)
 const BULLET_MAX_CHARS = 90;
 
+// Two-column layout constants
+// Each column: (576 - 8 gap) / 2 = 284 pt
+const COL_GAP = 8;
+const COL_WIDTH = (CONTENT_WIDTH - COL_GAP) / 2; // 284 pt
+const IMG_SIZE_2COL = 28;
+const IMG_GAP_2COL = 4;
+const INFO_WIDTH_2COL = COL_WIDTH - IMG_SIZE_2COL - IMG_GAP_2COL; // 252 pt
+const SKU_COL_2COL = 55;
+const PRICE_COL_2COL = 42;
+const NAME_COL_2COL = INFO_WIDTH_2COL - SKU_COL_2COL - PRICE_COL_2COL; // 155 pt
+const BULLET_MAX_CHARS_2COL = 65; // narrower column → fewer chars per line
+
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -259,6 +271,66 @@ const styles = StyleSheet.create({
     fontSize: 6.5,
     color: "#9ca3af",
   },
+
+  // Two-column layout -------------------------------------------------------
+  twoColPair: {
+    flexDirection: "row",
+    height: ROW_HEIGHT,
+    marginBottom: ROW_GAP,
+  },
+  twoColSpacer: {
+    width: COL_GAP,
+  },
+  productRow2col: {
+    width: COL_WIDTH,
+    flexDirection: "row",
+    height: ROW_HEIGHT,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#e5e7eb",
+  },
+  productImageCol2col: {
+    width: IMG_SIZE_2COL,
+    marginRight: IMG_GAP_2COL,
+    paddingTop: 3,
+  },
+  productImage2col: {
+    width: IMG_SIZE_2COL,
+    height: IMG_SIZE_2COL,
+    objectFit: "contain",
+    borderRadius: 2,
+    backgroundColor: "#f9fafb",
+  },
+  productImagePlaceholder2col: {
+    width: IMG_SIZE_2COL,
+    height: IMG_SIZE_2COL,
+    borderRadius: 2,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  productInfoCol2col: {
+    width: INFO_WIDTH_2COL,
+    paddingTop: 2,
+    overflow: "hidden",
+  },
+  productName2col: {
+    width: NAME_COL_2COL,
+    fontSize: 7,
+    fontWeight: "bold",
+    lineHeight: 1.15,
+  },
+  productSku2col: {
+    width: SKU_COL_2COL,
+    fontSize: 6,
+    color: "#6b7280",
+  },
+  productPrice2col: {
+    width: PRICE_COL_2COL,
+    fontSize: 7.5,
+    fontWeight: "bold",
+    color: "#2563eb",
+    textAlign: "right",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -293,6 +365,7 @@ interface BookSection {
   id: string;
   title: string;
   items: SectionItem[];
+  layout?: "1-col" | "2-col";
 }
 
 interface BookPdfProps {
@@ -346,6 +419,85 @@ function parseBullets(summary: string): string[] {
     .filter((s) => s.length > 5);
 
   return sentences.slice(0, 6);
+}
+
+// ---------------------------------------------------------------------------
+// 2-col helpers
+// ---------------------------------------------------------------------------
+type Pair =
+  | { kind: "header"; item: HeaderItem; key: string }
+  | { kind: "pair"; left: ProductItem; right: ProductItem | null; key: string };
+
+function buildPairs(items: SectionItem[]): Pair[] {
+  const result: Pair[] = [];
+  let pending: ProductItem | null = null;
+
+  for (const item of items) {
+    if (item.type === "header") {
+      if (pending) {
+        result.push({ kind: "pair", left: pending, right: null, key: `pair-${pending.product_cache_id}` });
+        pending = null;
+      }
+      result.push({ kind: "header", item, key: item.id });
+    } else {
+      if (pending) {
+        result.push({ kind: "pair", left: pending, right: item, key: `pair-${pending.product_cache_id}` });
+        pending = null;
+      } else {
+        pending = item;
+      }
+    }
+  }
+  if (pending) {
+    result.push({ kind: "pair", left: pending, right: null, key: `pair-${pending.product_cache_id}-last` });
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Product cell for 2-col layout
+// ---------------------------------------------------------------------------
+function ProductCell2Col({ product }: { product: ProductItem }) {
+  const effectiveDescription =
+    product.description_source === "custom" && product.user_description
+      ? product.user_description
+      : product.claude_summary;
+  const bullets = effectiveDescription ? parseBullets(effectiveDescription) : [];
+
+  return (
+    <View style={styles.productRow2col}>
+      {/* Image */}
+      <View style={styles.productImageCol2col}>
+        {product.primary_image_url ? (
+          <Image src={product.primary_image_url} style={styles.productImage2col} />
+        ) : (
+          <View style={styles.productImagePlaceholder2col}>
+            <Text style={{ fontSize: 4, color: "#9ca3af" }}>No img</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Info area */}
+      <View style={styles.productInfoCol2col}>
+        <View style={styles.topLine}>
+          <Text style={styles.productName2col}>{truncate(product.name, 40)}</Text>
+          <Text style={styles.productSku2col}>{product.sku || ""}</Text>
+          <Text style={styles.productPrice2col}>${product.price.toFixed(2)}</Text>
+        </View>
+
+        {bullets.length > 0 && (
+          <View style={styles.bulletArea}>
+            {bullets.map((b, i) => (
+              <View key={i} style={styles.bulletRow}>
+                <Text style={styles.bulletDot}>{"•"}</Text>
+                <Text style={styles.bulletText}>{truncate(b, BULLET_MAX_CHARS_2COL)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    </View>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -475,18 +627,36 @@ export default function BookPdfDocument({
                 </Text>
               </View>
 
-              {/* Items — products as horizontal rows, headers as blocks */}
-              {section.items.map((item, idx) =>
-                item.type === "header" ? (
-                  <HeaderBlock
-                    key={`${section.id}-hdr-${idx}`}
-                    header={item}
-                  />
-                ) : (
-                  <ProductRow
-                    key={`${section.id}-prod-${item.product_cache_id}`}
-                    product={item}
-                  />
+              {/* Items — 1-col rows or 2-col pairs */}
+              {section.layout === "2-col" ? (
+                buildPairs(section.items).map((row) =>
+                  row.kind === "header" ? (
+                    <HeaderBlock key={row.key} header={row.item} />
+                  ) : (
+                    <View key={row.key} style={styles.twoColPair} wrap={false}>
+                      <ProductCell2Col product={row.left} />
+                      <View style={styles.twoColSpacer} />
+                      {row.right ? (
+                        <ProductCell2Col product={row.right} />
+                      ) : (
+                        <View style={{ width: COL_WIDTH }} />
+                      )}
+                    </View>
+                  )
+                )
+              ) : (
+                section.items.map((item, idx) =>
+                  item.type === "header" ? (
+                    <HeaderBlock
+                      key={`${section.id}-hdr-${idx}`}
+                      header={item}
+                    />
+                  ) : (
+                    <ProductRow
+                      key={`${section.id}-prod-${item.product_cache_id}`}
+                      product={item}
+                    />
+                  )
                 )
               )}
             </View>
