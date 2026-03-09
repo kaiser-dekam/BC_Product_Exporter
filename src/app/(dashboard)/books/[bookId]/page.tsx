@@ -504,7 +504,6 @@ export default function BookEditorPage({
           <ExportPdfButton
             title={book.title}
             subtitle={book.cover_config.subtitle}
-            coverColor={book.cover_config.background_color}
             sections={book.sections}
           />
           <Button onClick={() => saveBook(book)} loading={saving} size="sm">
@@ -523,30 +522,17 @@ export default function BookEditorPage({
       {/* Cover Config */}
       <Card className="mb-6">
         <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Cover Settings</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <Input
-            label="Subtitle"
-            value={book.cover_config.subtitle}
-            onChange={(e) =>
-              setBook({
-                ...book,
-                cover_config: { ...book.cover_config, subtitle: e.target.value },
-              })
-            }
-            placeholder="A subtitle for the cover..."
-          />
-          <Input
-            label="Background Color"
-            type="color"
-            value={book.cover_config.background_color}
-            onChange={(e) =>
-              setBook({
-                ...book,
-                cover_config: { ...book.cover_config, background_color: e.target.value },
-              })
-            }
-          />
-        </div>
+        <Input
+          label="Subtitle"
+          value={book.cover_config.subtitle}
+          onChange={(e) =>
+            setBook({
+              ...book,
+              cover_config: { ...book.cover_config, subtitle: e.target.value },
+            })
+          }
+          placeholder="A subtitle for the cover..."
+        />
       </Card>
 
       {/* Sections */}

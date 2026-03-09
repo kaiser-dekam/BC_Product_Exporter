@@ -72,18 +72,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 60,
+    backgroundColor: "#ffffff",
   },
   coverTitle: {
     fontSize: 36,
     fontWeight: "bold",
     textAlign: "center",
-    color: "#ffffff",
+    color: "#111827",
     marginBottom: 12,
   },
   coverSubtitle: {
     fontSize: 16,
     textAlign: "center",
-    color: "rgba(255,255,255,0.8)",
+    color: "#6b7280",
   },
 
   // Section header ----------------------------------------------------------
@@ -297,7 +298,6 @@ interface BookSection {
 interface BookPdfProps {
   title: string;
   subtitle: string;
-  coverColor: string;
   sections: BookSection[];
 }
 
@@ -443,13 +443,12 @@ function ColumnHeaders() {
 export default function BookPdfDocument({
   title,
   subtitle,
-  coverColor,
   sections,
 }: BookPdfProps) {
   return (
     <Document>
       {/* Cover Page */}
-      <Page size="LETTER" style={{ padding: 0, backgroundColor: coverColor }}>
+      <Page size="LETTER" style={{ padding: 0 }}>
         <View style={styles.coverPage}>
           <Text style={styles.coverTitle}>{title}</Text>
           {subtitle && <Text style={styles.coverSubtitle}>{subtitle}</Text>}
