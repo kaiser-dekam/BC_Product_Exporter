@@ -1,5 +1,3 @@
-import type { Timestamp } from "firebase/firestore";
-
 export interface ProductCache {
   id: string;
   user_id: string;
@@ -29,9 +27,9 @@ export interface ProductCache {
   claude_specs: string | null;
   claude_weight_dims: string | null;
   claude_model_used: string | null;
-  summarized_at: Timestamp | null;
+  summarized_at: string | null;
 
   // Sync metadata
-  synced_at: Timestamp;
+  synced_at: string;
   raw_data: Record<string, unknown>;
 }

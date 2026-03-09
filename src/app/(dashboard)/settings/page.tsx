@@ -7,9 +7,33 @@ import Input from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
 
 const ALLOWED_MODELS = [
-  { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-  { value: "claude-haiku-3-5-20241022", label: "Claude 3.5 Haiku" },
-  { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
+  {
+    value: "claude-haiku-3-5-20241022",
+    label: "Claude 3.5 Haiku",
+    tier: "Economy",
+    tierColor: "bg-success/15 text-success",
+    description: "Fastest responses, lowest cost. Best for high-volume summarization.",
+    inputPrice: "$0.80",
+    outputPrice: "$4",
+  },
+  {
+    value: "claude-sonnet-4-20250514",
+    label: "Claude Sonnet 4",
+    tier: "Balanced",
+    tierColor: "bg-accent/15 text-accent",
+    description: "Best quality-to-cost ratio. Recommended for most use cases.",
+    inputPrice: "$3",
+    outputPrice: "$15",
+  },
+  {
+    value: "claude-opus-4-20250514",
+    label: "Claude Opus 4",
+    tier: "Premium",
+    tierColor: "bg-warning/15 text-warning",
+    description: "Most capable model. Best for complex descriptions and nuanced content.",
+    inputPrice: "$15",
+    outputPrice: "$75",
+  },
 ];
 
 export default function SettingsPage() {
@@ -649,20 +673,46 @@ export default function SettingsPage() {
               </p>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label className="block text-sm font-medium mb-3">
                     Default Claude Model
                   </label>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {ALLOWED_MODELS.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="space-y-2">
+                    {ALLOWED_MODELS.map((m) => {
+                      const isSelected = selectedModel === m.value;
+                      return (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setSelectedModel(m.value)}
+                          className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${
+                            isSelected
+                              ? "border-accent bg-accent/5 ring-1 ring-accent"
+                              : "border-border bg-surface hover:border-accent/40"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3 mb-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
+                                  isSelected
+                                    ? "border-accent bg-accent"
+                                    : "border-border"
+                                }`}
+                              />
+                              <span className="text-sm font-semibold">{m.label}</span>
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${m.tierColor}`}>
+                                {m.tier}
+                              </span>
+                            </div>
+                            <span className="text-xs text-muted whitespace-nowrap">
+                              {m.inputPrice} / {m.outputPrice} per 1M tokens
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted pl-5">{m.description}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <Button

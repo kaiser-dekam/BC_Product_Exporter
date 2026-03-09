@@ -1,44 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  // Check if any admin already exists
-  const adminsSnapshot = await adminDb
-    .collection("profiles")
-    .where("role", "==", "admin")
-    .limit(1)
-    .get();
+  const supabase = createAdminClient();
 
-  if (!adminsSnapshot.empty) {
+  // Check if any admin already exists
+  const { data: admins } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("role", "admin")
+    .limit(1);
+
+  if (admins && admins.length > 0) {
     return NextResponse.json(
       {
         error:
-          "An admin already exists. Use the Firestore console to add more admins.",
+          "An admin already exists. Use the Supabase dashboard to add more admins.",
       },
       { status: 403 }
     );
   }
 
-  // Promote the caller to admin
-  const profileRef = adminDb.collection("profiles").doc(auth.user.uid);
-  const profileDoc = await profileRef.get();
+  // Verify profile exists
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", auth.user.uid)
+    .single();
 
-  if (!profileDoc.exists) {
+  if (!profile) {
     return NextResponse.json(
       { error: "Profile not found. Please complete signup first." },
       { status: 404 }
     );
   }
 
-  await profileRef.update({
-    role: "admin",
-    updated_at: FieldValue.serverTimestamp(),
-  });
+  // Promote the caller to admin
+  await supabase
+    .from("profiles")
+    .update({ role: "admin" })
+    .eq("id", auth.user.uid);
 
   return NextResponse.json({
     status: "ok",

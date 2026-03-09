@@ -218,16 +218,23 @@ export default function BookEditorPage({
       const token = await getIdToken();
       if (!token) return;
 
-      const prodRes = await fetch(`/api/products?limit=200&mode=picker`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!prodRes.ok) throw new Error("Failed to fetch products");
-
-      const prodData = await prodRes.json();
-      const summaryMap = new Map<string, string | null>(
+      // Paginate through ALL products so large catalogs are fully covered
+      const summaryMap = new Map<string, string | null>();
+      let cursor = "";
+      let hasMore = true;
+      while (hasMore) {
+        const params = new URLSearchParams({ limit: "200", mode: "picker" });
+        if (cursor) params.set("cursor", cursor);
+        const prodRes = await fetch(`/api/products?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!prodRes.ok) throw new Error("Failed to fetch products");
+        const prodData = await prodRes.json();
         (prodData.products as Array<{ id: string; claude_summary: string | null }>)
-          .map((p) => [p.id, p.claude_summary])
-      );
+          .forEach((p) => summaryMap.set(p.id, p.claude_summary));
+        cursor = prodData.next_cursor || "";
+        hasMore = !!prodData.next_cursor;
+      }
 
       const updated = {
         ...book,
@@ -239,9 +246,14 @@ export default function BookEditorPage({
               !item.is_custom &&
               summaryMap.has(item.product_cache_id)
             ) {
+              const newSummary = summaryMap.get(item.product_cache_id) ?? item.claude_summary;
               return {
                 ...item,
-                claude_summary: summaryMap.get(item.product_cache_id) ?? item.claude_summary,
+                claude_summary: newSummary,
+                // If a real AI summary exists and no custom description overrides it,
+                // flip the source to "ai" so the editor badge reflects reality
+                description_source:
+                  newSummary && !item.user_description ? "ai" : item.description_source,
               };
             }
             return item;
@@ -250,7 +262,7 @@ export default function BookEditorPage({
       };
 
       setBook(updated);
-      saveBook(updated);
+      await saveBook(updated);
       setSaveMessage("Summaries synced!");
       setTimeout(() => setSaveMessage(null), 2000);
     } catch (err) {

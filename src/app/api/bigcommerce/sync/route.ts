@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, resolveCredentials } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 import { fetchProducts, fetchBrandMap } from "@/lib/bigcommerce/client";
 
 export async function POST(req: NextRequest) {
@@ -14,21 +13,18 @@ export async function POST(req: NextRequest) {
     const resolved = await resolveCredentials(uid, body.credentials);
     if (resolved.error) return resolved.error;
 
-    const products = await fetchProducts(resolved.config, { includeVariants: false });
+    const products = await fetchProducts(resolved.config, {
+      includeVariants: false,
+    });
     const brandMap = await fetchBrandMap(resolved.config);
 
-    const productCacheRef = adminDb.collection("product_cache");
-    const BATCH_LIMIT = 500;
+    const supabase = createAdminClient();
+    const CHUNK_SIZE = 500;
 
-    for (let i = 0; i < products.length; i += BATCH_LIMIT) {
-      const batch = adminDb.batch();
-      const chunk = products.slice(i, i + BATCH_LIMIT);
+    for (let i = 0; i < products.length; i += CHUNK_SIZE) {
+      const chunk = products.slice(i, i + CHUNK_SIZE);
 
-      for (const product of chunk) {
-        const docId = `${uid}_${product.id}`;
-        const ref = productCacheRef.doc(docId);
-
-        const data = {
+      const rows = chunk.map((product) => ({
           id: `${uid}_${product.id}`,
           user_id: uid,
           bigcommerce_product_id: product.id,
@@ -39,8 +35,8 @@ export async function POST(req: NextRequest) {
           cost_price: product.cost_price || 0,
           description: product.description || "",
           primary_image_url: product.primary_image?.url_standard || "",
-          image_urls: (product.images || []).map((img: { url_standard: string }) => img.url_standard),
-          brand_name: brandMap[product.brand_id] || "",
+          image_urls: (product.images || []).map((img) => img.url_standard),
+          brand_name: brandMap[product.brand_id ?? 0] || "",
           categories: product.categories || [],
           category_names: [] as string[],
           inventory_level: product.inventory_level || 0,
@@ -51,24 +47,24 @@ export async function POST(req: NextRequest) {
           height: product.height || 0,
           depth: product.depth || 0,
           custom_url: product.custom_url?.url || "",
-          synced_at: FieldValue.serverTimestamp(),
+          synced_at: new Date().toISOString(),
           raw_data: product as unknown as Record<string, unknown>,
-        };
+        })
+      );
 
-        batch.set(ref, data, { merge: true });
-      }
-
-      await batch.commit();
+      await supabase
+        .from("product_cache")
+        .upsert(rows, { onConflict: "id" });
     }
 
-    const profileRef = adminDb.collection("profiles").doc(uid);
-    await profileRef.set(
-      {
-        last_synced_at: FieldValue.serverTimestamp(),
+    // Update profile sync metadata
+    await supabase
+      .from("profiles")
+      .update({
+        last_synced_at: new Date().toISOString(),
         product_count: products.length,
-      },
-      { merge: true }
-    );
+      })
+      .eq("id", uid);
 
     return NextResponse.json({ status: "ok", synced: products.length });
   } catch (error: unknown) {
@@ -83,17 +79,22 @@ export async function GET(req: NextRequest) {
   const uid = auth.user.uid;
 
   try {
-
-    const profileRef = adminDb.collection("profiles").doc(uid);
-    const profileSnap = await profileRef.get();
-    const profile = profileSnap.data() || {};
+    const supabase = createAdminClient();
+    const { data } = await supabase
+      .from("profiles")
+      .select("last_synced_at, product_count")
+      .eq("id", uid)
+      .single();
 
     return NextResponse.json({
-      last_synced_at: profile.last_synced_at || null,
-      product_count: profile.product_count || 0,
+      last_synced_at: data?.last_synced_at || null,
+      product_count: data?.product_count || 0,
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to get sync status";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to get sync status";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

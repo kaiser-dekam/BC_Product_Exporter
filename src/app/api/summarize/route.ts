@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, getSiteSettings } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/crypto";
 
 const DEFAULT_SYSTEM_PROMPT = `You are a product catalog specialist. Given product information, create a concise, professional summary suitable for a printed sales book.
@@ -24,10 +23,14 @@ Dimensions: ${product.width ?? ""} x ${product.height ?? ""} x ${product.depth ?
 }
 
 async function loadAnthropicApiKey(uid: string): Promise<string | null> {
-  const profileDoc = await adminDb.collection("profiles").doc(uid).get();
-  if (!profileDoc.exists) return null;
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("anthropic_api_key_encrypted, anthropic_iv, anthropic_auth_tag")
+    .eq("id", uid)
+    .single();
 
-  const data = profileDoc.data()!;
+  if (!data) return null;
 
   if (
     data.anthropic_api_key_encrypted &&
@@ -80,17 +83,24 @@ export async function POST(req: NextRequest) {
   }
   if (!apiKey) {
     return NextResponse.json(
-      { error: "No Anthropic API key configured. Add one in Settings or set the ANTHROPIC_API_KEY environment variable." },
+      {
+        error:
+          "No Anthropic API key configured. Add one in Settings or set the ANTHROPIC_API_KEY environment variable.",
+      },
       { status: 400 }
     );
   }
 
   // Resolve the system prompt
+  const supabase = createAdminClient();
   let systemPrompt = system_prompt || null;
   if (!systemPrompt) {
-    const profileDoc = await adminDb.collection("profiles").doc(uid).get();
-    if (profileDoc.exists) {
-      const profileData = profileDoc.data()!;
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("claude_system_prompt")
+      .eq("id", uid)
+      .single();
+    if (profileData) {
       systemPrompt = profileData.claude_system_prompt || null;
     }
   }
@@ -108,18 +118,15 @@ export async function POST(req: NextRequest) {
   // Process products sequentially to avoid rate limits
   for (const productId of product_ids) {
     try {
-      const productRef = adminDb.collection("product_cache").doc(productId);
-      const productDoc = await productRef.get();
+      const { data: productData, error: fetchError } = await supabase
+        .from("product_cache")
+        .select("*")
+        .eq("id", productId)
+        .eq("user_id", uid)
+        .single();
 
-      if (!productDoc.exists) {
+      if (fetchError || !productData) {
         errors.push(`Product ${productId} not found`);
-        continue;
-      }
-
-      const productData = productDoc.data()!;
-
-      if (productData.user_id !== uid) {
-        errors.push(`Product ${productId} does not belong to this user`);
         continue;
       }
 
@@ -151,11 +158,19 @@ export async function POST(req: NextRequest) {
       const result = await response.json();
       const summaryText: string = result.content[0].text;
 
-      await productRef.update({
-        claude_summary: summaryText,
-        claude_model_used: claudeModel,
-        summarized_at: FieldValue.serverTimestamp(),
-      });
+      const { error: updateError } = await supabase
+        .from("product_cache")
+        .update({
+          claude_summary: summaryText,
+          claude_model_used: claudeModel,
+          summarized_at: new Date().toISOString(),
+        })
+        .eq("id", productId);
+
+      if (updateError) {
+        errors.push(`Failed to save summary for ${productId}: ${updateError.message}`);
+        continue;
+      }
 
       summarized++;
     } catch (err) {

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(
   req: NextRequest,
@@ -14,18 +13,19 @@ export async function GET(
   const uid = auth.user.uid;
 
   try {
-    const doc = await adminDb.collection("books").doc(bookId).get();
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("books")
+      .select("*")
+      .eq("id", bookId)
+      .eq("user_id", uid)
+      .single();
 
-    if (!doc.exists) {
+    if (error || !data) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
-    const data = doc.data()!;
-    if (data.user_id !== uid) {
-      return NextResponse.json({ error: "Book not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ id: doc.id, ...data });
+    return NextResponse.json(data);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch book";
@@ -44,15 +44,17 @@ export async function PUT(
   const uid = auth.user.uid;
 
   try {
-    const docRef = adminDb.collection("books").doc(bookId);
-    const doc = await docRef.get();
+    const supabase = createAdminClient();
 
-    if (!doc.exists) {
-      return NextResponse.json({ error: "Book not found" }, { status: 404 });
-    }
+    // Verify ownership
+    const { data: existing, error: fetchError } = await supabase
+      .from("books")
+      .select("id")
+      .eq("id", bookId)
+      .eq("user_id", uid)
+      .single();
 
-    const data = doc.data()!;
-    if (data.user_id !== uid) {
+    if (fetchError || !existing) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
@@ -65,9 +67,7 @@ export async function PUT(
       "sections",
     ];
 
-    const updateData: Record<string, unknown> = {
-      updated_at: FieldValue.serverTimestamp(),
-    };
+    const updateData: Record<string, unknown> = {};
 
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
@@ -91,7 +91,13 @@ export async function PUT(
       updateData.page_count = pageCount;
     }
 
-    await docRef.update(updateData);
+    const { error: updateError } = await supabase
+      .from("books")
+      .update(updateData)
+      .eq("id", bookId)
+      .eq("user_id", uid);
+
+    if (updateError) throw updateError;
 
     return NextResponse.json({ status: "ok" });
   } catch (err) {
@@ -112,19 +118,14 @@ export async function DELETE(
   const uid = auth.user.uid;
 
   try {
-    const docRef = adminDb.collection("books").doc(bookId);
-    const doc = await docRef.get();
+    const supabase = createAdminClient();
+    const { error } = await supabase
+      .from("books")
+      .delete()
+      .eq("id", bookId)
+      .eq("user_id", uid);
 
-    if (!doc.exists) {
-      return NextResponse.json({ error: "Book not found" }, { status: 404 });
-    }
-
-    const data = doc.data()!;
-    if (data.user_id !== uid) {
-      return NextResponse.json({ error: "Book not found" }, { status: 404 });
-    }
-
-    await docRef.delete();
+    if (error) throw error;
 
     return NextResponse.json({ status: "ok" });
   } catch (err) {

@@ -4,8 +4,7 @@ import {
   requireAdmin,
   getSiteSettings,
 } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 
 const ALLOWED_MODELS = [
   "claude-sonnet-4-20250514",
@@ -43,15 +42,14 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const settingsRef = adminDb.collection("site_settings").doc("global");
-  await settingsRef.set(
-    {
+  const supabase = createAdminClient();
+  await supabase
+    .from("site_settings")
+    .update({
       default_claude_model,
-      updated_at: FieldValue.serverTimestamp(),
       updated_by: auth.user.uid,
-    },
-    { merge: true }
-  );
+    })
+    .eq("id", "global");
 
   return NextResponse.json({ status: "ok" });
 }

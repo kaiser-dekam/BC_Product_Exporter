@@ -1,5 +1,3 @@
-import type { Timestamp } from "firebase/firestore";
-
 export interface EncryptedCredentials {
   store_hash_encrypted: string;
   client_id_encrypted: string;
@@ -14,8 +12,8 @@ export interface Profile {
   full_name: string;
   store_name: string;
   role: "admin" | "user";
-  created_at: Timestamp;
-  updated_at: Timestamp;
+  created_at: string;
+  updated_at: string;
 
   bigcommerce_credentials: EncryptedCredentials | null;
 
@@ -43,6 +41,6 @@ export interface DecryptedCredentials {
 
 export interface SiteSettings {
   default_claude_model: string;
-  updated_at: Timestamp;
+  updated_at: string;
   updated_by: string;
 }

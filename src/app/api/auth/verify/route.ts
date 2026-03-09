@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { verifyAccessToken } from "@/lib/supabase/auth";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing id_token" }, { status: 400 });
   }
 
-  const decoded = await verifyIdToken(id_token);
+  const decoded = await verifyAccessToken(id_token);
   if (!decoded) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }

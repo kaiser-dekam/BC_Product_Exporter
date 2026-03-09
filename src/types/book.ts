@@ -1,5 +1,3 @@
-import type { Timestamp } from "firebase/firestore";
-
 export interface Book {
   id: string;
   user_id: string;
@@ -12,8 +10,8 @@ export interface Book {
     subtitle: string;
     logo_url: string | null;
   };
-  created_at: Timestamp;
-  updated_at: Timestamp;
+  created_at: string;
+  updated_at: string;
   page_count: number;
 }
 
@@ -25,8 +23,8 @@ export interface BookPage {
   type: PageType;
   title: string;
   sort_order: number;
-  created_at: Timestamp;
-  updated_at: Timestamp;
+  created_at: string;
+  updated_at: string;
   divider_config: {
     heading: string;
     subheading: string;
@@ -40,8 +38,8 @@ export interface BookSection {
   book_id: string;
   title: string;
   sort_order: number;
-  created_at: Timestamp;
-  updated_at: Timestamp;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface BookProduct {
@@ -57,6 +55,6 @@ export interface BookProduct {
   override_specs: string | null;
   override_weight_dims: string | null;
   show_in_book: boolean;
-  created_at: Timestamp;
-  updated_at: Timestamp;
+  created_at: string;
+  updated_at: string;
 }

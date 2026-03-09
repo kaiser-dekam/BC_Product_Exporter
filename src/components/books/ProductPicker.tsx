@@ -55,7 +55,7 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
   const [customForm, setCustomForm] = useState(EMPTY_CUSTOM_FORM);
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
 
-  // Load all products once (from cache or API), no re-fetching on search
+  // Load ALL products (paginated) once, then cache client-side for search
   const fetchProducts = useCallback(async () => {
     if (isCacheValid()) {
       setProducts(cachedProducts!);
@@ -67,19 +67,29 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
       const token = await getIdToken();
       if (!token) return;
 
-      // Fetch all products in one call with picker mode (lightweight fields)
-      const params = new URLSearchParams({ limit: "200", mode: "picker" });
+      const all: PickerProduct[] = [];
+      let cursor = "";
+      let hasMore = true;
 
-      const res = await fetch(`/api/products?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      while (hasMore) {
+        const params = new URLSearchParams({ limit: "200", mode: "picker" });
+        if (cursor) params.set("cursor", cursor);
 
-      if (res.ok) {
+        const res = await fetch(`/api/products?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) break;
+
         const data = await res.json();
-        setProducts(data.products);
-        cachedProducts = data.products;
-        cacheTimestamp = Date.now();
+        all.push(...(data.products as PickerProduct[]));
+        cursor = data.next_cursor || "";
+        hasMore = !!data.next_cursor;
       }
+
+      setProducts(all);
+      cachedProducts = all;
+      cacheTimestamp = Date.now();
     } catch {
       // Silently fail
     } finally {

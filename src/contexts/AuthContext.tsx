@@ -8,14 +8,8 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  type User,
-} from "firebase/auth";
-import { auth } from "@/lib/firebase/client";
+import { createClient } from "@/lib/supabase/client";
+import type { User } from "@supabase/supabase-js";
 
 type UserRole = "admin" | "user";
 
@@ -33,17 +27,18 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const supabase = createClient();
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<UserRole | null>(null);
 
   // Fetch role from profile API
-  const fetchRole = useCallback(async (firebaseUser: User) => {
+  const fetchRole = useCallback(async (accessToken: string) => {
     try {
-      const token = await firebaseUser.getIdToken();
       const res = await fetch("/api/profile", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (res.ok) {
         const data = await res.json();
@@ -57,40 +52,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        fetchRole(firebaseUser);
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.access_token) {
+        fetchRole(session.access_token);
+      }
+      setLoading(false);
+    });
+
+    // Listen for auth state changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.access_token) {
+        fetchRole(session.access_token);
       } else {
         setRole(null);
       }
       setLoading(false);
     });
-    return unsubscribe;
+
+    return () => subscription.unsubscribe();
   }, [fetchRole]);
 
   const signIn = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
   };
 
-  const signUp = async (email: string, password: string) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    return cred.user;
+  const signUp = async (email: string, password: string): Promise<User> => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+    if (!data.user) throw new Error("Signup failed: no user returned");
+    return data.user;
   };
 
   const signOutUser = async () => {
-    await firebaseSignOut(auth);
+    await supabase.auth.signOut();
   };
 
-  const getIdToken = async () => {
-    if (!auth.currentUser) return null;
-    return auth.currentUser.getIdToken();
+  const getIdToken = async (): Promise<string | null> => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
   };
 
   // Allow manual role refresh (e.g., after bootstrapping admin)
   const refreshRole = useCallback(async () => {
-    if (auth.currentUser) {
-      await fetchRole(auth.currentUser);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      await fetchRole(session.access_token);
     }
   }, [fetchRole]);
 

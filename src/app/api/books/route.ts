@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
@@ -10,32 +9,16 @@ export async function GET(req: NextRequest) {
   const uid = auth.user.uid;
 
   try {
-    const snapshot = await adminDb
-      .collection("books")
-      .where("user_id", "==", uid)
-      .get();
+    const supabase = createAdminClient();
+    const { data: books, error } = await supabase
+      .from("books")
+      .select("*")
+      .eq("user_id", uid)
+      .order("updated_at", { ascending: false });
 
-    const books = snapshot.docs
-      .map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }))
-      // Sort client-side to avoid requiring a composite Firestore index
-      .sort((a, b) => {
-        const aTime = (a as Record<string, unknown>).updated_at;
-        const bTime = (b as Record<string, unknown>).updated_at;
-        const aSeconds =
-          (aTime && typeof aTime === "object" && "seconds" in aTime
-            ? (aTime as { seconds: number }).seconds
-            : 0);
-        const bSeconds =
-          (bTime && typeof bTime === "object" && "seconds" in bTime
-            ? (bTime as { seconds: number }).seconds
-            : 0);
-        return bSeconds - aSeconds;
-      });
+    if (error) throw error;
 
-    return NextResponse.json({ books });
+    return NextResponse.json({ books: books || [] });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch books";
@@ -60,24 +43,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const docRef = await adminDb.collection("books").add({
-      user_id: uid,
-      title,
-      description: description || "",
-      status: "draft",
-      cover_config: {
-        background_color: "#0f172a",
-        title_font_size: 32,
-        subtitle: "",
-        logo_url: null,
-      },
-      sections: [],
-      created_at: FieldValue.serverTimestamp(),
-      updated_at: FieldValue.serverTimestamp(),
-      page_count: 0,
-    });
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("books")
+      .insert({
+        user_id: uid,
+        title,
+        description: description || "",
+        status: "draft",
+        cover_config: {
+          background_color: "#0f172a",
+          title_font_size: 32,
+          subtitle: "",
+          logo_url: null,
+        },
+        sections: [],
+        page_count: 0,
+      })
+      .select("id")
+      .single();
 
-    return NextResponse.json({ id: docRef.id, status: "ok" });
+    if (error) throw error;
+
+    return NextResponse.json({ id: data.id, status: "ok" });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to create book";

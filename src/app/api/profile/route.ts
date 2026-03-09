@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyIdToken, extractBearerToken } from "@/lib/firebase/auth";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { verifyAccessToken, extractBearerToken } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   const token = extractBearerToken(req.headers.get("authorization"));
@@ -9,7 +8,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const decoded = await verifyIdToken(token);
+  const decoded = await verifyAccessToken(token);
   if (!decoded) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
@@ -17,41 +16,32 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { full_name, store_name, claude_system_prompt } = body;
 
-  const profileRef = adminDb.collection("profiles").doc(decoded.uid);
-  const existing = await profileRef.get();
+  const supabase = createAdminClient();
 
-  if (existing.exists) {
+  // Check if profile exists
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", decoded.uid)
+    .single();
+
+  if (existing) {
     // Update existing profile
-    const updates: Record<string, unknown> = { updated_at: FieldValue.serverTimestamp() };
+    const updates: Record<string, unknown> = {};
     if (full_name !== undefined) updates.full_name = full_name;
     if (store_name !== undefined) updates.store_name = store_name;
-    if (claude_system_prompt !== undefined) updates.claude_system_prompt = claude_system_prompt;
-    await profileRef.update(updates);
-  } else {
-    // Create new profile, check for legacy credentials migration
-    let legacyCreds = null;
-    const legacyRef = adminDb.collection("user_credentials").doc(decoded.uid);
-    const legacyDoc = await legacyRef.get();
-    if (legacyDoc.exists) {
-      legacyCreds = legacyDoc.data();
-    }
+    if (claude_system_prompt !== undefined)
+      updates.claude_system_prompt = claude_system_prompt;
 
-    await profileRef.set({
-      uid: decoded.uid,
+    await supabase.from("profiles").update(updates).eq("id", decoded.uid);
+  } else {
+    // Create new profile
+    await supabase.from("profiles").insert({
+      id: decoded.uid,
       email: decoded.email || "",
       full_name: full_name || "",
       store_name: store_name || "",
       role: "user",
-      created_at: FieldValue.serverTimestamp(),
-      updated_at: FieldValue.serverTimestamp(),
-      bigcommerce_credentials: null,
-      anthropic_api_key_encrypted: null,
-      anthropic_iv: null,
-      anthropic_auth_tag: null,
-      claude_system_prompt: null,
-      csv_preferences: null,
-      // Store legacy creds reference for migration in settings page
-      _legacy_creds: legacyCreds || null,
     });
   }
 
@@ -64,22 +54,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const decoded = await verifyIdToken(token);
+  const decoded = await verifyAccessToken(token);
   if (!decoded) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  const profileRef = adminDb.collection("profiles").doc(decoded.uid);
-  const doc = await profileRef.get();
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select(
+      "id, email, full_name, store_name, role, bigcommerce_credentials, anthropic_api_key_encrypted, claude_system_prompt, csv_preferences"
+    )
+    .eq("id", decoded.uid)
+    .single();
 
-  if (!doc.exists) {
+  if (error || !data) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
 
-  const data = doc.data()!;
   // Return profile without exposing encrypted credential values
   return NextResponse.json({
-    uid: data.uid,
+    uid: data.id,
     email: data.email,
     full_name: data.full_name,
     store_name: data.store_name,

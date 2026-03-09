@@ -408,7 +408,7 @@ function parseBullets(summary: string): string[] {
     )
     .filter(Boolean);
 
-  if (cleaned.length >= 2) {
+  if (cleaned.length >= 1) {
     return cleaned.slice(0, 6);
   }
 
@@ -416,7 +416,7 @@ function parseBullets(summary: string): string[] {
   const sentences = summary
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 5);
+    .filter((s) => s.length > 3);
 
   return sentences.slice(0, 6);
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
+import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(
   req: NextRequest,
@@ -13,23 +13,22 @@ export async function GET(
   const uid = auth.user.uid;
 
   try {
-    const doc = await adminDb.collection("product_cache").doc(productId).get();
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("product_cache")
+      .select("*")
+      .eq("id", productId)
+      .eq("user_id", uid)
+      .single();
 
-    if (!doc.exists) {
-      return NextResponse.json({ error: "Product not found" }, { status: 404 });
-    }
-
-    const data = doc.data()!;
-
-    // Verify ownership
-    if (data.user_id !== uid) {
+    if (error || !data) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
     // Return all fields except raw_data (the full BigCommerce JSON blob)
     const { raw_data: _raw, ...rest } = data;
 
-    return NextResponse.json({ id: doc.id, ...rest });
+    return NextResponse.json(rest);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch product";

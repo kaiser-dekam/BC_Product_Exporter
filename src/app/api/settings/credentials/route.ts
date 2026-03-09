@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-helpers";
-import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createAdminClient } from "@/lib/supabase/server";
 import { encrypt } from "@/lib/crypto";
 
 // PUT - Save BigCommerce credentials (encrypted)
@@ -22,21 +21,23 @@ export async function PUT(req: NextRequest) {
   const clientIdEnc = encrypt(client_id);
   const accessTokenEnc = encrypt(access_token);
 
-  const profileRef = adminDb.collection("profiles").doc(auth.user.uid);
-  await profileRef.update({
-    bigcommerce_credentials: {
-      store_hash_encrypted: storeHashEnc.ciphertext,
-      store_hash_iv: storeHashEnc.iv,
-      store_hash_authTag: storeHashEnc.authTag,
-      client_id_encrypted: clientIdEnc.ciphertext,
-      client_id_iv: clientIdEnc.iv,
-      client_id_authTag: clientIdEnc.authTag,
-      access_token_encrypted: accessTokenEnc.ciphertext,
-      access_token_iv: accessTokenEnc.iv,
-      access_token_authTag: accessTokenEnc.authTag,
-    },
-    updated_at: FieldValue.serverTimestamp(),
-  });
+  const supabase = createAdminClient();
+  await supabase
+    .from("profiles")
+    .update({
+      bigcommerce_credentials: {
+        store_hash_encrypted: storeHashEnc.ciphertext,
+        store_hash_iv: storeHashEnc.iv,
+        store_hash_authTag: storeHashEnc.authTag,
+        client_id_encrypted: clientIdEnc.ciphertext,
+        client_id_iv: clientIdEnc.iv,
+        client_id_authTag: clientIdEnc.authTag,
+        access_token_encrypted: accessTokenEnc.ciphertext,
+        access_token_iv: accessTokenEnc.iv,
+        access_token_authTag: accessTokenEnc.authTag,
+      },
+    })
+    .eq("id", auth.user.uid);
 
   return NextResponse.json({ status: "ok" });
 }

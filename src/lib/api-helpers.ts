@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyIdToken, extractBearerToken } from "@/lib/firebase/auth";
-import { adminDb } from "@/lib/firebase/admin";
+import { verifyAccessToken, extractBearerToken } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/crypto";
 import type { BigCommerceConfig } from "@/lib/bigcommerce/types";
 
@@ -21,7 +21,7 @@ export async function authenticateRequest(
     };
   }
 
-  const decoded = await verifyIdToken(token);
+  const decoded = await verifyAccessToken(token);
   if (!decoded) {
     return {
       error: NextResponse.json({ error: "Invalid token" }, { status: 401 }),
@@ -32,7 +32,7 @@ export async function authenticateRequest(
 }
 
 /**
- * Load and decrypt BigCommerce credentials from the user's Firestore profile.
+ * Load and decrypt BigCommerce credentials from the user's profile.
  * Returns the config or a NextResponse error.
  */
 export async function loadCredentialsFromProfile(
@@ -41,10 +41,14 @@ export async function loadCredentialsFromProfile(
   | { config: BigCommerceConfig; error?: never }
   | { config?: never; error: NextResponse }
 > {
-  const profileRef = adminDb.collection("profiles").doc(uid);
-  const doc = await profileRef.get();
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("bigcommerce_credentials")
+    .eq("id", uid)
+    .single();
 
-  if (!doc.exists) {
+  if (error || !data) {
     return {
       error: NextResponse.json(
         { error: "Profile not found" },
@@ -53,7 +57,6 @@ export async function loadCredentialsFromProfile(
     };
   }
 
-  const data = doc.data()!;
   const creds = data.bigcommerce_credentials;
 
   if (!creds) {
@@ -95,7 +98,7 @@ export async function loadCredentialsFromProfile(
 
 /**
  * Resolve BigCommerce credentials from either the request body or the user's profile.
- * If `credentials` is provided in the body, use it directly. Otherwise, load from Firestore.
+ * If `credentials` is provided in the body, use it directly. Otherwise, load from DB.
  */
 export async function resolveCredentials(
   uid: string,
@@ -133,10 +136,14 @@ export async function requireAdmin(
   | { ok: true; error?: never }
   | { ok?: never; error: NextResponse }
 > {
-  const profileRef = adminDb.collection("profiles").doc(uid);
-  const doc = await profileRef.get();
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", uid)
+    .single();
 
-  if (!doc.exists) {
+  if (error || !data) {
     return {
       error: NextResponse.json(
         { error: "Profile not found" },
@@ -145,7 +152,6 @@ export async function requireAdmin(
     };
   }
 
-  const data = doc.data()!;
   if (data.role !== "admin") {
     return {
       error: NextResponse.json(
@@ -167,17 +173,23 @@ const DEFAULT_SITE_SETTINGS = {
 };
 
 /**
- * Load site-wide settings from Firestore.
- * Returns sensible defaults if no settings doc exists yet.
+ * Load site-wide settings from the database.
+ * Returns sensible defaults if no settings row exists yet.
  */
 export async function getSiteSettings(): Promise<{
   default_claude_model: string;
 }> {
-  const doc = await adminDb.collection("site_settings").doc("global").get();
-  if (!doc.exists) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("site_settings")
+    .select("default_claude_model")
+    .eq("id", "global")
+    .single();
+
+  if (error || !data) {
     return DEFAULT_SITE_SETTINGS;
   }
-  const data = doc.data()!;
+
   return {
     default_claude_model:
       data.default_claude_model || DEFAULT_SITE_SETTINGS.default_claude_model,
