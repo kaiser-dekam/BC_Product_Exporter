@@ -271,6 +271,8 @@ interface ProductItem {
   price: number;
   primary_image_url: string;
   claude_summary: string | null;
+  user_description?: string | null;
+  description_source?: "ai" | "custom";
   weight?: number;
   width?: number;
   height?: number;
@@ -350,9 +352,11 @@ function parseBullets(summary: string): string[] {
 // Product row (horizontal with full-width bullet points)
 // ---------------------------------------------------------------------------
 function ProductRow({ product }: { product: ProductItem }) {
-  const bullets = product.claude_summary
-    ? parseBullets(product.claude_summary)
-    : [];
+  const effectiveDescription =
+    product.description_source === "custom" && product.user_description
+      ? product.user_description
+      : product.claude_summary;
+  const bullets = effectiveDescription ? parseBullets(effectiveDescription) : [];
 
   return (
     <View style={styles.productRow} wrap={false}>

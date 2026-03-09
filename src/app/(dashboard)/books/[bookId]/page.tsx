@@ -37,6 +37,9 @@ export interface ProductItem {
   price: number;
   primary_image_url: string;
   claude_summary: string | null;
+  user_description: string | null;       // user-written custom description
+  description_source: "ai" | "custom";  // which to render in PDF
+  is_custom?: boolean;                   // true for manually created products
 }
 
 export interface HeaderItem {
@@ -86,12 +89,25 @@ function migrateSections(
     items: s.items
       ? // New format — items already tagged with `type`
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (s.items as any[]).map((item) =>
-          item.type ? item : { ...item, type: "product" as const }
-        )
+        (s.items as any[]).map((item) => {
+          if (!item.type) return { ...item, type: "product" as const, user_description: null, description_source: "ai" as const };
+          if (item.type === "product") {
+            return {
+              ...item,
+              user_description: item.user_description ?? null,
+              description_source: item.description_source ?? "ai",
+            };
+          }
+          return item;
+        })
       : // Old format — convert plain product objects
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (s.products || []).map((p: any) => ({ ...p, type: "product" as const })),
+        (s.products || []).map((p: any) => ({
+          ...p,
+          type: "product" as const,
+          user_description: null,
+          description_source: "ai" as const,
+        })),
   }));
 }
 
@@ -315,6 +331,33 @@ export default function BookEditorPage({
   );
 
   // -----------------------------------------------------------------------
+  // Product description editing
+  // -----------------------------------------------------------------------
+  const updateProductDescription = useCallback(
+    (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => {
+      if (!book) return;
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                items: s.items.map((item) =>
+                  item.type === "product" && item.product_cache_id === productId
+                    ? { ...item, user_description, description_source }
+                    : item
+                ),
+              }
+            : s
+        ),
+      };
+      setBook(updated);
+      saveBook(updated);
+    },
+    [book, saveBook]
+  );
+
+  // -----------------------------------------------------------------------
   // Product picker
   // -----------------------------------------------------------------------
   const openProductPicker = useCallback((sectionId: string) => {
@@ -323,7 +366,7 @@ export default function BookEditorPage({
   }, []);
 
   const handleAddProducts = useCallback(
-    (products: Array<{ id: string; name: string; sku: string; price: number; primary_image_url: string; claude_summary: string | null }>) => {
+    (products: Array<{ id: string; name: string; sku: string; price: number; primary_image_url: string; claude_summary: string | null; user_description?: string | null; description_source?: "ai" | "custom"; is_custom?: boolean }>) => {
       if (!book || !pickerSectionId) return;
       const newItems: ProductItem[] = products.map((p) => ({
         type: "product" as const,
@@ -333,6 +376,9 @@ export default function BookEditorPage({
         price: p.price,
         primary_image_url: p.primary_image_url,
         claude_summary: p.claude_summary,
+        user_description: p.user_description ?? null,
+        description_source: p.description_source ?? (p.claude_summary ? "ai" : "custom"),
+        is_custom: p.is_custom ?? false,
       }));
 
       const updated = {
@@ -566,6 +612,7 @@ export default function BookEditorPage({
                 onAddHeader={addHeader}
                 onUpdateHeader={updateHeader}
                 onReorderItems={reorderItems}
+                onUpdateProductDescription={updateProductDescription}
               />
             ))}
           </SortableContext>
