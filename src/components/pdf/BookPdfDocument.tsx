@@ -449,8 +449,8 @@ export default function BookPdfDocument({
   return (
     <Document>
       {/* Cover Page */}
-      <Page size="LETTER" style={[styles.page, { padding: 0 }]}>
-        <View style={[styles.coverPage, { backgroundColor: coverColor }]}>
+      <Page size="LETTER" style={{ padding: 0, backgroundColor: coverColor }}>
+        <View style={styles.coverPage}>
           <Text style={styles.coverTitle}>{title}</Text>
           {subtitle && <Text style={styles.coverSubtitle}>{subtitle}</Text>}
         </View>
