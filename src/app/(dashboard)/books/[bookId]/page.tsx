@@ -128,6 +128,7 @@ export default function BookEditorPage({
   const [book, setBook] = useState<BookData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -156,40 +157,6 @@ export default function BookEditorPage({
 
       // Migrate sections from old `products` format to new `items` format
       data.sections = migrateSections(data.sections || []);
-
-      // Re-hydrate claude_summary from the live product catalog so the book
-      // always reflects the latest AI summaries from the Product Library.
-      // Only updates products where the user hasn't set a custom description.
-      try {
-        const prodRes = await fetch(`/api/products?limit=200&mode=picker`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (prodRes.ok) {
-          const prodData = await prodRes.json();
-          const summaryMap = new Map<string, string | null>(
-            (prodData.products as Array<{ id: string; claude_summary: string | null }>)
-              .map((p) => [p.id, p.claude_summary])
-          );
-          data.sections = (data.sections as BookSection[]).map((s) => ({
-            ...s,
-            items: s.items.map((item) => {
-              if (
-                item.type === "product" &&
-                !item.is_custom &&
-                summaryMap.has(item.product_cache_id)
-              ) {
-                return {
-                  ...item,
-                  claude_summary: summaryMap.get(item.product_cache_id) ?? item.claude_summary,
-                };
-              }
-              return item;
-            }),
-          }));
-        }
-      } catch {
-        // Silently fall back to stored summaries
-      }
 
       setBook(data);
     } catch (err) {
@@ -240,6 +207,59 @@ export default function BookEditorPage({
       setSaving(false);
     }
   }, [getIdToken, bookId]);
+
+  // -----------------------------------------------------------------------
+  // Sync summaries from Product Library (on demand — avoids quota burn)
+  // -----------------------------------------------------------------------
+  const syncSummaries = useCallback(async () => {
+    if (!book) return;
+    setSyncing(true);
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const prodRes = await fetch(`/api/products?limit=200&mode=picker`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!prodRes.ok) throw new Error("Failed to fetch products");
+
+      const prodData = await prodRes.json();
+      const summaryMap = new Map<string, string | null>(
+        (prodData.products as Array<{ id: string; claude_summary: string | null }>)
+          .map((p) => [p.id, p.claude_summary])
+      );
+
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) => ({
+          ...s,
+          items: s.items.map((item) => {
+            if (
+              item.type === "product" &&
+              !item.is_custom &&
+              summaryMap.has(item.product_cache_id)
+            ) {
+              return {
+                ...item,
+                claude_summary: summaryMap.get(item.product_cache_id) ?? item.claude_summary,
+              };
+            }
+            return item;
+          }),
+        })),
+      };
+
+      setBook(updated);
+      saveBook(updated);
+      setSaveMessage("Summaries synced!");
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to sync summaries");
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSyncing(false);
+    }
+  }, [book, getIdToken, saveBook]);
 
   // -----------------------------------------------------------------------
   // Section CRUD
@@ -555,6 +575,15 @@ export default function BookEditorPage({
         </div>
         <div className="flex items-center gap-2">
           {saveMessage && <span className="text-sm text-success">{saveMessage}</span>}
+          <Button
+            onClick={syncSummaries}
+            loading={syncing}
+            size="sm"
+            variant="ghost"
+            title="Pull the latest AI summaries from your Product Library"
+          >
+            {syncing ? "Syncing..." : "Sync Summaries"}
+          </Button>
           <ExportPdfButton
             title={book.title}
             subtitle={book.cover_config.subtitle}
