@@ -77,13 +77,13 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: "bold",
     textAlign: "center",
-    color: "#ffffff",
+    color: "#111827",
     marginBottom: 12,
   },
   coverSubtitle: {
     fontSize: 16,
     textAlign: "center",
-    color: "rgba(255,255,255,0.8)",
+    color: "#6b7280",
   },
 
   // Section header ----------------------------------------------------------
@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
   },
   sectionProductCount: {
     fontSize: 6.5,
-    color: "#666666",
+    color: "#1a1a1a",
     marginTop: 1,
   },
 
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
   headerH3: {
     fontSize: 8.5,
     fontWeight: "bold",
-    color: "#374151",
+    color: "#1a1a1a",
     marginTop: 3,
     marginBottom: 1,
   },
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     width: NAME_COL,
     fontSize: 6,
     fontWeight: "bold",
-    color: "#6b7280",
+    color: "#1a1a1a",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
     width: SKU_COL,
     fontSize: 6,
     fontWeight: "bold",
-    color: "#6b7280",
+    color: "#1a1a1a",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     width: PRICE_COL,
     fontSize: 6,
     fontWeight: "bold",
-    color: "#6b7280",
+    color: "#1a1a1a",
     textTransform: "uppercase",
     letterSpacing: 0.5,
     textAlign: "right",
@@ -214,13 +214,13 @@ const styles = StyleSheet.create({
   productSku: {
     width: SKU_COL,
     fontSize: 6.5,
-    color: "#6b7280",
+    color: "#1a1a1a",
   },
   productPrice: {
     width: PRICE_COL,
     fontSize: 8.5,
     fontWeight: "bold",
-    color: "#2563eb",
+    color: "#1a1a1a",
     textAlign: "right",
   },
 
@@ -234,13 +234,13 @@ const styles = StyleSheet.create({
   },
   bulletDot: {
     fontSize: BULLET_FONT,
-    color: "#9ca3af",
+    color: "#1a1a1a",
     width: 8,
   },
   bulletText: {
     fontSize: BULLET_FONT,
     lineHeight: BULLET_LINE_HEIGHT / BULLET_FONT,
-    color: "#374151",
+    color: "#1a1a1a",
   },
 
   // Footer ------------------------------------------------------------------
@@ -252,11 +252,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     fontSize: 6.5,
-    color: "#9ca3af",
+    color: "#1a1a1a",
   },
   pageNumber: {
     fontSize: 6.5,
-    color: "#9ca3af",
+    color: "#1a1a1a",
   },
 });
 
@@ -297,7 +297,6 @@ interface BookSection {
 interface BookPdfProps {
   title: string;
   subtitle: string;
-  coverColor: string;
   sections: BookSection[];
 }
 
@@ -366,7 +365,7 @@ function ProductRow({ product }: { product: ProductItem }) {
           <Image src={product.primary_image_url} style={styles.productImage} />
         ) : (
           <View style={styles.productImagePlaceholder}>
-            <Text style={{ fontSize: 5, color: "#9ca3af" }}>No img</Text>
+            <Text style={{ fontSize: 5, color: "#1a1a1a" }}>No img</Text>
           </View>
         )}
       </View>
@@ -443,14 +442,13 @@ function ColumnHeaders() {
 export default function BookPdfDocument({
   title,
   subtitle,
-  coverColor,
   sections,
 }: BookPdfProps) {
   return (
     <Document>
       {/* Cover Page */}
-      <Page size="LETTER" style={[styles.page, { padding: 0 }]}>
-        <View style={[styles.coverPage, { backgroundColor: coverColor }]}>
+      <Page size="LETTER" style={{ padding: 0, backgroundColor: "#ffffff" }}>
+        <View style={styles.coverPage}>
           <Text style={styles.coverTitle}>{title}</Text>
           {subtitle && <Text style={styles.coverSubtitle}>{subtitle}</Text>}
         </View>
@@ -496,7 +494,7 @@ export default function BookPdfDocument({
 
         {/* Footer on every page */}
         <View style={styles.footer} fixed>
-          <Text>{title}</Text>
+          <Text>{subtitle ? `${title} · ${subtitle}` : title}</Text>
           <Text
             render={({ pageNumber, totalPages }) =>
               `${pageNumber} / ${totalPages}`

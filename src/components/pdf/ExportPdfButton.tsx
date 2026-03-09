@@ -13,14 +13,12 @@ interface BookSection {
 interface ExportPdfButtonProps {
   title: string;
   subtitle: string;
-  coverColor: string;
   sections: BookSection[];
 }
 
 export default function ExportPdfButton({
   title,
   subtitle,
-  coverColor,
   sections,
 }: ExportPdfButtonProps) {
   const [loading, setLoading] = useState(false);
@@ -35,12 +33,11 @@ export default function ExportPdfButton({
     const doc = BookPdfDocument({
       title,
       subtitle,
-      coverColor,
       sections,
     });
 
     return pdf(doc).toBlob();
-  }, [title, subtitle, coverColor, sections]);
+  }, [title, subtitle, sections]);
 
   // ---- Preview in modal ----
   const handlePreview = useCallback(async () => {

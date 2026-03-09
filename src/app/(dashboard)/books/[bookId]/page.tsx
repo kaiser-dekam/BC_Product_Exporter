@@ -155,6 +155,40 @@ export default function BookEditorPage({
       // Migrate sections from old `products` format to new `items` format
       data.sections = migrateSections(data.sections || []);
 
+      // Re-hydrate claude_summary from the live product catalog so the book
+      // always reflects the latest AI summaries from the Product Library.
+      // Only updates products where the user hasn't set a custom description.
+      try {
+        const prodRes = await fetch(`/api/products?limit=200&mode=picker`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (prodRes.ok) {
+          const prodData = await prodRes.json();
+          const summaryMap = new Map<string, string | null>(
+            (prodData.products as Array<{ id: string; claude_summary: string | null }>)
+              .map((p) => [p.id, p.claude_summary])
+          );
+          data.sections = (data.sections as BookSection[]).map((s) => ({
+            ...s,
+            items: s.items.map((item) => {
+              if (
+                item.type === "product" &&
+                !item.is_custom &&
+                summaryMap.has(item.product_cache_id)
+              ) {
+                return {
+                  ...item,
+                  claude_summary: summaryMap.get(item.product_cache_id) ?? item.claude_summary,
+                };
+              }
+              return item;
+            }),
+          }));
+        }
+      } catch {
+        // Silently fall back to stored summaries
+      }
+
       setBook(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load book");
@@ -504,7 +538,6 @@ export default function BookEditorPage({
           <ExportPdfButton
             title={book.title}
             subtitle={book.cover_config.subtitle}
-            coverColor={book.cover_config.background_color}
             sections={book.sections}
           />
           <Button onClick={() => saveBook(book)} loading={saving} size="sm">
