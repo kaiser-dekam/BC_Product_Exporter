@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, getSiteSettings } from "@/lib/api-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { encrypt } from "@/lib/crypto";
@@ -38,6 +38,10 @@ export async function POST(req: NextRequest) {
 
   const { api_key } = await req.json();
 
+  // Use site-wide model setting for test call
+  const siteSettings = await getSiteSettings();
+  const claudeModel = siteSettings.default_claude_model;
+
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -47,7 +51,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: claudeModel,
         max_tokens: 10,
         messages: [{ role: "user", content: "Hi" }],
       }),

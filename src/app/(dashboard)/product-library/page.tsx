@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
@@ -9,6 +9,7 @@ import ProductCard from "@/components/product-library/ProductCard";
 import SyncButton from "@/components/product-library/SyncButton";
 import SummarizePanel from "@/components/product-library/SummarizePanel";
 import ProductDetailModal from "@/components/product-library/ProductDetailModal";
+import { invalidatePickerCache } from "@/components/books/ProductPicker";
 
 interface CachedProduct {
   id: string;
@@ -19,7 +20,7 @@ interface CachedProduct {
   cost_price: number;
   primary_image_url: string;
   brand_name: string;
-  description: string;
+  description?: string;
   inventory_level: number;
   is_visible: boolean;
   availability: string;
@@ -32,11 +33,12 @@ interface CachedProduct {
   claude_model_used: string | null;
 }
 
+const PAGE_SIZE = 200;
+
 export default function ProductLibraryPage() {
   const { getIdToken } = useAuth();
 
-  const [products, setProducts] = useState<CachedProduct[]>([]);
-  const [total, setTotal] = useState(0);
+  const [allProducts, setAllProducts] = useState<CachedProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [syncLoading, setSyncLoading] = useState(false);
@@ -48,25 +50,44 @@ export default function ProductLibraryPage() {
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailProduct, setDetailProduct] = useState<CachedProduct | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  // Fetch products from cache
-  const fetchProducts = useCallback(async (searchTerm = "") => {
+  // How many products to show (for "Show More" in filtered results)
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  // Load ALL products once using cursor pagination (one-time cost)
+  const fetchAllProducts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const token = await getIdToken();
       if (!token) return;
 
-      const params = new URLSearchParams({ limit: "200" });
-      if (searchTerm) params.set("search", searchTerm);
+      let all: CachedProduct[] = [];
+      let cursor = "";
+      let hasMore = true;
 
-      const res = await fetch(`/api/products?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      while (hasMore) {
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+        if (cursor) params.set("cursor", cursor);
 
-      if (!res.ok) throw new Error("Failed to load products");
+        const res = await fetch(`/api/products?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      const data = await res.json();
-      setProducts(data.products);
-      setTotal(data.total);
+        if (!res.ok) throw new Error("Failed to load products");
+
+        const data = await res.json();
+        all = [...all, ...data.products];
+
+        if (data.next_cursor) {
+          cursor = data.next_cursor;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      setAllProducts(all);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load products");
     } finally {
@@ -94,20 +115,34 @@ export default function ProductLibraryPage() {
     }
   }, [getIdToken]);
 
-  // Initial load
+  // Initial load — fetch once
+  const initialLoad = useRef(false);
   useEffect(() => {
-    fetchProducts();
+    if (initialLoad.current) return;
+    initialLoad.current = true;
+    fetchAllProducts();
     fetchSyncStatus();
-  }, [fetchProducts, fetchSyncStatus]);
+  }, [fetchAllProducts, fetchSyncStatus]);
 
-  // Debounced search
+  // Client-side search filtering (no API calls)
+  const filteredProducts = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return allProducts;
+    return allProducts.filter((p) => {
+      const name = (p.name || "").toLowerCase();
+      const sku = (p.sku || "").toLowerCase();
+      return name.includes(term) || sku.includes(term);
+    });
+  }, [allProducts, search]);
+
+  // Products to display (capped by visibleCount)
+  const displayProducts = filteredProducts.slice(0, visibleCount);
+  const hasMore = filteredProducts.length > visibleCount;
+
+  // Reset visible count when search changes
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      setLoading(true);
-      fetchProducts(search);
-    }, 300);
-    return () => clearTimeout(timeout);
-  }, [search, fetchProducts]);
+    setVisibleCount(50);
+  }, [search]);
 
   // Handle sync
   const handleSync = useCallback(async () => {
@@ -137,8 +172,12 @@ export default function ProductLibraryPage() {
       setSyncMessage(`Synced ${data.synced} products`);
       setTimeout(() => setSyncMessage(null), 5000);
 
-      // Refresh data
-      await fetchProducts(search);
+      // Invalidate picker cache since products changed
+      invalidatePickerCache();
+
+      // Re-fetch all products
+      initialLoad.current = false;
+      await fetchAllProducts();
       await fetchSyncStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
@@ -146,7 +185,7 @@ export default function ProductLibraryPage() {
     } finally {
       setSyncLoading(false);
     }
-  }, [getIdToken, fetchProducts, fetchSyncStatus, search]);
+  }, [getIdToken, fetchAllProducts, fetchSyncStatus]);
 
   // Toggle product selection
   const handleSelect = useCallback((id: string) => {
@@ -154,6 +193,35 @@ export default function ProductLibraryPage() {
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   }, []);
+
+  // Handle product click — lazy-load description
+  const handleProductClick = useCallback(async (product: CachedProduct) => {
+    setDetailProduct(product);
+
+    if (product.description !== undefined) return;
+
+    setDetailLoading(true);
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/products/${product.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const fullProduct = await res.json();
+        setDetailProduct((prev) => prev ? { ...prev, description: fullProduct.description || "" } : null);
+        setAllProducts((prev) =>
+          prev.map((p) => p.id === product.id ? { ...p, description: fullProduct.description || "" } : p)
+        );
+      }
+    } catch {
+      // Modal still works without description
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [getIdToken]);
 
   // Handle AI summarization
   const handleSummarize = useCallback(
@@ -177,12 +245,16 @@ export default function ProductLibraryPage() {
 
       const data = await res.json();
 
-      // Refresh products to show updated summaries
-      await fetchProducts(search);
+      // Invalidate picker cache since summaries changed
+      invalidatePickerCache();
+
+      // Re-fetch products
+      initialLoad.current = false;
+      await fetchAllProducts();
 
       return { summarized: data.summarized, errors: data.errors || [] };
     },
-    [getIdToken, fetchProducts, search]
+    [getIdToken, fetchAllProducts]
   );
 
   return (
@@ -224,7 +296,7 @@ export default function ProductLibraryPage() {
       {/* Search */}
       <div className="mb-6">
         <Input
-          placeholder="Search products by name..."
+          placeholder="Search products by name or SKU..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -233,20 +305,24 @@ export default function ProductLibraryPage() {
       {/* Stats bar */}
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-muted">
-          {loading ? "Loading..." : `Showing ${products.length} of ${total} products`}
+          {loading
+            ? "Loading..."
+            : search
+            ? `${filteredProducts.length} matches out of ${allProducts.length} products`
+            : `${allProducts.length} products`}
         </p>
-        {products.length > 0 && (
+        {displayProducts.length > 0 && (
           <button
             onClick={() => {
-              if (selectedIds.length === products.length) {
+              if (selectedIds.length === filteredProducts.length) {
                 setSelectedIds([]);
               } else {
-                setSelectedIds(products.map((p) => p.id));
+                setSelectedIds(filteredProducts.map((p) => p.id));
               }
             }}
             className="text-xs text-accent hover:text-accent/80 transition-colors"
           >
-            {selectedIds.length === products.length ? "Deselect All" : "Select All"}
+            {selectedIds.length === filteredProducts.length ? "Deselect All" : "Select All"}
           </button>
         )}
       </div>
@@ -256,7 +332,7 @@ export default function ProductLibraryPage() {
         <div className="flex justify-center py-12">
           <Spinner size="lg" />
         </div>
-      ) : products.length === 0 ? (
+      ) : displayProducts.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <svg className="w-12 h-12 text-muted/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -269,23 +345,38 @@ export default function ProductLibraryPage() {
           </p>
         </Card>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              selected={selectedIds.includes(product.id)}
-              onSelect={handleSelect}
-              onClick={() => setDetailProduct(product)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {displayProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                selected={selectedIds.includes(product.id)}
+                onSelect={handleSelect}
+                onClick={() => handleProductClick(product)}
+              />
+            ))}
+          </div>
+
+          {/* Show More button */}
+          {hasMore && (
+            <div className="flex justify-center mt-8">
+              <button
+                onClick={() => setVisibleCount((prev) => prev + 50)}
+                className="text-sm text-accent hover:text-accent/80 transition-colors"
+              >
+                Show More ({filteredProducts.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Product Detail Modal */}
       <ProductDetailModal
         product={detailProduct}
         onClose={() => setDetailProduct(null)}
+        descriptionLoading={detailLoading}
       />
     </div>
   );

@@ -7,15 +7,66 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer";
 
+// ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+// LETTER = 612 × 792 pt.
+// 0.25" margins = 18 pt → content area 576 × 756 pt.
+// Footer 14 pt → usable 742 pt.
+// Column headers (fixed) 14 pt + 2 pt gap = 16 pt → body 726 pt.
+// Target: 15 products per page.
+// 15 × 47 pt rows + 14 × 1 pt gaps = 719 pt → fits in 726 pt.
+//
+// Each row: image (38 pt) + info area (532 pt).
+// Info area layout (top → bottom):
+//   Name / SKU / Price line …… ~8 pt
+//   6 bullet lines at 5.5 pt font, 6 pt line-height …… 36 pt
+//   Padding …… ~3 pt
+//   Total ≈ 47 pt ✓
+//
+// Bullets use full 532 pt width → ~100+ chars per line at 5.5 pt Helvetica.
+// AI prompt limits each bullet to 90 chars, so no truncation needed.
+
+const MARGIN = 18; // 0.25"
+const CONTENT_WIDTH = 612 - MARGIN * 2; // 576 pt
+const ROW_HEIGHT = 47;
+const ROW_GAP = 1;
+const FOOTER_HEIGHT = 14;
+
+// Image
+const IMAGE_SIZE = 38;
+const IMAGE_GAP = 6;
+
+// Info area = CONTENT_WIDTH - IMAGE_SIZE - IMAGE_GAP = 532 pt
+const INFO_WIDTH = CONTENT_WIDTH - IMAGE_SIZE - IMAGE_GAP;
+
+// Top-line columns inside info area
+const SKU_COL = 80;
+const PRICE_COL = 55;
+const NAME_COL = INFO_WIDTH - SKU_COL - PRICE_COL; // ~397 pt
+
+// Bullet font
+const BULLET_FONT = 5.5;
+const BULLET_LINE_HEIGHT = 6; // pt absolute
+
+// Max characters per bullet (matches AI prompt constraint of 90 chars)
+const BULLET_MAX_CHARS = 90;
+
+// ---------------------------------------------------------------------------
 // Styles
+// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   page: {
-    padding: 40,
+    paddingTop: MARGIN,
+    paddingBottom: MARGIN + FOOTER_HEIGHT,
+    paddingHorizontal: MARGIN,
     fontFamily: "Helvetica",
-    fontSize: 10,
+    fontSize: 8,
     color: "#1a1a1a",
     backgroundColor: "#ffffff",
   },
+
+  // Cover -------------------------------------------------------------------
   coverPage: {
     flex: 1,
     justifyContent: "center",
@@ -34,108 +85,186 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "rgba(255,255,255,0.8)",
   },
-  sectionDivider: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 60,
-    backgroundColor: "#f8f9fa",
+
+  // Section header ----------------------------------------------------------
+  sectionHeader: {
+    marginBottom: 4,
+    paddingBottom: 3,
+    borderBottomWidth: 1.5,
+    borderBottomColor: "#2563eb",
   },
   sectionTitle: {
-    fontSize: 28,
+    fontSize: 12,
     fontWeight: "bold",
-    textAlign: "center",
     color: "#1a1a1a",
-    marginBottom: 8,
   },
   sectionProductCount: {
-    fontSize: 12,
-    textAlign: "center",
+    fontSize: 6.5,
     color: "#666666",
+    marginTop: 1,
   },
-  productCard: {
-    marginBottom: 20,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 6,
+
+  // Inline headers (H1, H2, H3) --------------------------------------------
+  headerH1: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: "#1a1a1a",
+    marginTop: 5,
+    marginBottom: 2,
   },
-  productHeader: {
+  headerH2: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#1a1a1a",
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  headerH3: {
+    fontSize: 8.5,
+    fontWeight: "bold",
+    color: "#374151",
+    marginTop: 3,
+    marginBottom: 1,
+  },
+
+  // Column header row (repeats each page) -----------------------------------
+  columnHeader: {
     flexDirection: "row",
-    marginBottom: 10,
+    alignItems: "center",
+    height: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#d1d5db",
+    marginBottom: 2,
+  },
+  colHeaderImage: {
+    width: IMAGE_SIZE + IMAGE_GAP,
+  },
+  colHeaderName: {
+    width: NAME_COL,
+    fontSize: 6,
+    fontWeight: "bold",
+    color: "#6b7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  colHeaderSku: {
+    width: SKU_COL,
+    fontSize: 6,
+    fontWeight: "bold",
+    color: "#6b7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  colHeaderPrice: {
+    width: PRICE_COL,
+    fontSize: 6,
+    fontWeight: "bold",
+    color: "#6b7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    textAlign: "right",
+  },
+
+  // Product row (horizontal, full-width) ------------------------------------
+  productRow: {
+    flexDirection: "row",
+    height: ROW_HEIGHT,
+    marginBottom: ROW_GAP,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#e5e7eb",
+  },
+  productImageCol: {
+    width: IMAGE_SIZE,
+    marginRight: IMAGE_GAP,
+    paddingTop: 3,
   },
   productImage: {
-    width: 80,
-    height: 80,
+    width: IMAGE_SIZE,
+    height: IMAGE_SIZE,
     objectFit: "contain",
-    marginRight: 15,
-    borderRadius: 4,
+    borderRadius: 3,
     backgroundColor: "#f9fafb",
   },
-  productInfo: {
-    flex: 1,
+  productImagePlaceholder: {
+    width: IMAGE_SIZE,
+    height: IMAGE_SIZE,
+    borderRadius: 3,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  productInfoCol: {
+    width: INFO_WIDTH,
+    paddingTop: 2,
+    overflow: "hidden",
+  },
+
+  // Top line: name | sku | price
+  topLine: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 1,
   },
   productName: {
-    fontSize: 14,
+    width: NAME_COL,
+    fontSize: 7.5,
     fontWeight: "bold",
-    marginBottom: 4,
+    lineHeight: 1.15,
   },
   productSku: {
-    fontSize: 9,
+    width: SKU_COL,
+    fontSize: 6.5,
     color: "#6b7280",
-    marginBottom: 4,
   },
   productPrice: {
-    fontSize: 16,
+    width: PRICE_COL,
+    fontSize: 8.5,
     fontWeight: "bold",
     color: "#2563eb",
+    textAlign: "right",
   },
-  productSalePrice: {
-    fontSize: 10,
-    color: "#ef4444",
-    textDecoration: "line-through",
-    marginLeft: 6,
+
+  // Bullet area: single column, full info width
+  bulletArea: {
+    // full width of info col, stacks vertically
   },
-  productSummary: {
-    fontSize: 10,
-    lineHeight: 1.5,
-    color: "#374151",
-    marginTop: 8,
-    padding: 10,
-    backgroundColor: "#f0f7ff",
-    borderRadius: 4,
-  },
-  productSpecs: {
+  bulletRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 8,
-    gap: 8,
+    height: BULLET_LINE_HEIGHT,
   },
-  specItem: {
-    fontSize: 8,
-    color: "#6b7280",
-    padding: "3 6",
-    backgroundColor: "#f3f4f6",
-    borderRadius: 3,
+  bulletDot: {
+    fontSize: BULLET_FONT,
+    color: "#9ca3af",
+    width: 8,
   },
+  bulletText: {
+    fontSize: BULLET_FONT,
+    lineHeight: BULLET_LINE_HEIGHT / BULLET_FONT,
+    color: "#374151",
+  },
+
+  // Footer ------------------------------------------------------------------
   footer: {
     position: "absolute",
-    bottom: 20,
-    left: 40,
-    right: 40,
+    bottom: MARGIN,
+    left: MARGIN,
+    right: MARGIN,
     flexDirection: "row",
     justifyContent: "space-between",
-    fontSize: 8,
+    fontSize: 6.5,
     color: "#9ca3af",
   },
   pageNumber: {
-    fontSize: 8,
+    fontSize: 6.5,
     color: "#9ca3af",
   },
 });
 
+// ---------------------------------------------------------------------------
 // Types
-interface BookProduct {
+// ---------------------------------------------------------------------------
+interface ProductItem {
+  type: "product";
   product_cache_id: string;
   name: string;
   sku: string;
@@ -148,10 +277,19 @@ interface BookProduct {
   depth?: number;
 }
 
+interface HeaderItem {
+  type: "header";
+  id: string;
+  level: 1 | 2 | 3;
+  text: string;
+}
+
+type SectionItem = ProductItem | HeaderItem;
+
 interface BookSection {
   id: string;
   title: string;
-  products: BookProduct[];
+  items: SectionItem[];
 }
 
 interface BookPdfProps {
@@ -161,7 +299,143 @@ interface BookPdfProps {
   sections: BookSection[];
 }
 
-// Component
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Truncate text to a max length. */
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1) + "\u2026";
+}
+
+/**
+ * Parse an AI summary string into individual bullet points.
+ * Handles formats: "- text", "• text", "* text", "1. text", and plain lines.
+ * Falls back to sentence splitting for paragraph-style text.
+ * Returns up to 6 items.
+ */
+function parseBullets(summary: string): string[] {
+  // Split on newlines and clean up
+  const rawLines = summary
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // Strip bullet / number markers and markdown bold
+  const cleaned = rawLines
+    .map((l) =>
+      l
+        .replace(/^[-–—•*]\s*/, "")
+        .replace(/^\d+[.)]\s*/, "")
+        .replace(/\*\*(.+?)\*\*/g, "$1") // strip markdown bold
+        .trim()
+    )
+    .filter(Boolean);
+
+  if (cleaned.length >= 2) {
+    return cleaned.slice(0, 6);
+  }
+
+  // Fallback: split paragraph on sentences
+  const sentences = summary
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 5);
+
+  return sentences.slice(0, 6);
+}
+
+// ---------------------------------------------------------------------------
+// Product row (horizontal with full-width bullet points)
+// ---------------------------------------------------------------------------
+function ProductRow({ product }: { product: ProductItem }) {
+  const bullets = product.claude_summary
+    ? parseBullets(product.claude_summary)
+    : [];
+
+  return (
+    <View style={styles.productRow} wrap={false}>
+      {/* Image */}
+      <View style={styles.productImageCol}>
+        {product.primary_image_url ? (
+          <Image src={product.primary_image_url} style={styles.productImage} />
+        ) : (
+          <View style={styles.productImagePlaceholder}>
+            <Text style={{ fontSize: 5, color: "#9ca3af" }}>No img</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Info area */}
+      <View style={styles.productInfoCol}>
+        {/* Top line: Name | SKU | Price */}
+        <View style={styles.topLine}>
+          <Text style={styles.productName}>
+            {truncate(product.name, 70)}
+          </Text>
+          <Text style={styles.productSku}>
+            {product.sku || ""}
+          </Text>
+          <Text style={styles.productPrice}>
+            ${product.price.toFixed(2)}
+          </Text>
+        </View>
+
+        {/* Bullet points — single column, full width */}
+        {bullets.length > 0 && (
+          <View style={styles.bulletArea}>
+            {bullets.map((b, i) => (
+              <View key={i} style={styles.bulletRow}>
+                <Text style={styles.bulletDot}>{"•"}</Text>
+                <Text style={styles.bulletText}>
+                  {truncate(b, BULLET_MAX_CHARS)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Header block
+// ---------------------------------------------------------------------------
+function HeaderBlock({ header }: { header: HeaderItem }) {
+  if (!header.text) return null;
+  const headerStyle =
+    header.level === 1
+      ? styles.headerH1
+      : header.level === 2
+      ? styles.headerH2
+      : styles.headerH3;
+
+  return (
+    <View wrap={false}>
+      <Text style={headerStyle}>{header.text}</Text>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Column header row (repeats on each page)
+// ---------------------------------------------------------------------------
+function ColumnHeaders() {
+  return (
+    <View style={styles.columnHeader} fixed>
+      <View style={styles.colHeaderImage} />
+      <Text style={styles.colHeaderName}>Product</Text>
+      <Text style={styles.colHeaderSku}>SKU</Text>
+      <Text style={styles.colHeaderPrice}>Price</Text>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Document
+// ---------------------------------------------------------------------------
 export default function BookPdfDocument({
   title,
   subtitle,
@@ -178,70 +452,55 @@ export default function BookPdfDocument({
         </View>
       </Page>
 
-      {/* Sections */}
-      {sections.map((section) => (
-        <Page key={section.id} size="LETTER" style={styles.page} wrap>
-          {/* Section divider */}
-          <View style={styles.sectionDivider} break>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <Text style={styles.sectionProductCount}>
-              {section.products.length} product{section.products.length !== 1 ? "s" : ""}
-            </Text>
-          </View>
+      {/* Content pages — all sections flow continuously */}
+      <Page size="LETTER" style={styles.page} wrap>
+        {/* Repeat column headers at top of every page */}
+        <ColumnHeaders />
 
-          {/* Products */}
-          {section.products.map((product) => (
-            <View key={product.product_cache_id} style={styles.productCard} wrap={false}>
-              <View style={styles.productHeader}>
-                {product.primary_image_url ? (
-                  <Image src={product.primary_image_url} style={styles.productImage} />
-                ) : (
-                  <View style={[styles.productImage, { justifyContent: "center", alignItems: "center" }]}>
-                    <Text style={{ fontSize: 8, color: "#9ca3af" }}>No Image</Text>
-                  </View>
-                )}
-                <View style={styles.productInfo}>
-                  <Text style={styles.productName}>{product.name}</Text>
-                  {product.sku && (
-                    <Text style={styles.productSku}>SKU: {product.sku}</Text>
-                  )}
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <Text style={styles.productPrice}>${product.price.toFixed(2)}</Text>
-                  </View>
-                </View>
+        {sections.map((section) => {
+          const productCount = section.items.filter(
+            (i) => i.type === "product"
+          ).length;
+
+          return (
+            <View key={section.id}>
+              {/* Section heading */}
+              <View style={styles.sectionHeader} wrap={false}>
+                <Text style={styles.sectionTitle}>{section.title}</Text>
+                <Text style={styles.sectionProductCount}>
+                  {productCount} product{productCount !== 1 ? "s" : ""}
+                </Text>
               </View>
 
-              {/* AI Summary */}
-              {product.claude_summary && (
-                <Text style={styles.productSummary}>{product.claude_summary}</Text>
-              )}
-
-              {/* Specs */}
-              {(product.weight || product.width || product.height || product.depth) && (
-                <View style={styles.productSpecs}>
-                  {product.weight ? (
-                    <Text style={styles.specItem}>Weight: {product.weight} lbs</Text>
-                  ) : null}
-                  {product.width && product.height && product.depth ? (
-                    <Text style={styles.specItem}>
-                      Dims: {product.width} x {product.height} x {product.depth} in
-                    </Text>
-                  ) : null}
-                </View>
+              {/* Items — products as horizontal rows, headers as blocks */}
+              {section.items.map((item, idx) =>
+                item.type === "header" ? (
+                  <HeaderBlock
+                    key={`${section.id}-hdr-${idx}`}
+                    header={item}
+                  />
+                ) : (
+                  <ProductRow
+                    key={`${section.id}-prod-${item.product_cache_id}`}
+                    product={item}
+                  />
+                )
               )}
             </View>
-          ))}
+          );
+        })}
 
-          {/* Footer */}
-          <View style={styles.footer} fixed>
-            <Text>{title}</Text>
-            <Text
-              render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`}
-              style={styles.pageNumber}
-            />
-          </View>
-        </Page>
-      ))}
+        {/* Footer on every page */}
+        <View style={styles.footer} fixed>
+          <Text>{title}</Text>
+          <Text
+            render={({ pageNumber, totalPages }) =>
+              `${pageNumber} / ${totalPages}`
+            }
+            style={styles.pageNumber}
+          />
+        </View>
+      </Page>
     </Document>
   );
 }

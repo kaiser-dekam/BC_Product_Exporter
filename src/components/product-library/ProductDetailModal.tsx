@@ -2,6 +2,7 @@
 
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
+import Spinner from "@/components/ui/Spinner";
 
 interface ProductDetailModalProps {
   product: {
@@ -13,7 +14,7 @@ interface ProductDetailModalProps {
     cost_price: number;
     primary_image_url: string;
     brand_name: string;
-    description: string;
+    description?: string;
     inventory_level: number;
     is_visible: boolean;
     availability: string;
@@ -26,9 +27,10 @@ interface ProductDetailModalProps {
     claude_model_used: string | null;
   } | null;
   onClose: () => void;
+  descriptionLoading?: boolean;
 }
 
-export default function ProductDetailModal({ product, onClose }: ProductDetailModalProps) {
+export default function ProductDetailModal({ product, onClose, descriptionLoading }: ProductDetailModalProps) {
   if (!product) return null;
 
   return (
@@ -115,7 +117,15 @@ export default function ProductDetailModal({ product, onClose }: ProductDetailMo
         )}
 
         {/* Description */}
-        {product.description && (
+        {descriptionLoading ? (
+          <div>
+            <h4 className="text-sm font-semibold text-muted mb-2">Original Description</h4>
+            <div className="flex items-center gap-2 py-4 text-sm text-muted">
+              <Spinner size="sm" />
+              <span>Loading description...</span>
+            </div>
+          </div>
+        ) : product.description ? (
           <div>
             <h4 className="text-sm font-semibold text-muted mb-2">Original Description</h4>
             <div
@@ -123,7 +133,7 @@ export default function ProductDetailModal({ product, onClose }: ProductDetailMo
               dangerouslySetInnerHTML={{ __html: product.description }}
             />
           </div>
-        )}
+        ) : null}
       </div>
     </Modal>
   );

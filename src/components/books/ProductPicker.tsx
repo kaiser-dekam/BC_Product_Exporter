@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
@@ -23,6 +23,21 @@ interface ProductPickerProps {
   existingProductIds: string[];
 }
 
+// Module-level cache for picker products (shared across all instances)
+let cachedProducts: PickerProduct[] | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 120_000; // 2 minutes
+
+/** Invalidate the ProductPicker cache (call after sync or summarize) */
+export function invalidatePickerCache() {
+  cachedProducts = null;
+  cacheTimestamp = 0;
+}
+
+function isCacheValid(): boolean {
+  return cachedProducts !== null && Date.now() - cacheTimestamp < CACHE_TTL;
+}
+
 export default function ProductPicker({ open, onClose, onAdd, existingProductIds }: ProductPickerProps) {
   const { getIdToken } = useAuth();
   const [products, setProducts] = useState<PickerProduct[]>([]);
@@ -30,14 +45,20 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const fetchProducts = useCallback(async (searchTerm = "") => {
+  // Load all products once (from cache or API), no re-fetching on search
+  const fetchProducts = useCallback(async () => {
+    if (isCacheValid()) {
+      setProducts(cachedProducts!);
+      return;
+    }
+
     setLoading(true);
     try {
       const token = await getIdToken();
       if (!token) return;
 
-      const params = new URLSearchParams({ limit: "100" });
-      if (searchTerm) params.set("search", searchTerm);
+      // Fetch all products in one call with picker mode (lightweight fields)
+      const params = new URLSearchParams({ limit: "200", mode: "picker" });
 
       const res = await fetch(`/api/products?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -46,6 +67,8 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
       if (res.ok) {
         const data = await res.json();
         setProducts(data.products);
+        cachedProducts = data.products;
+        cacheTimestamp = Date.now();
       }
     } catch {
       // Silently fail
@@ -62,11 +85,20 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
     }
   }, [open, fetchProducts]);
 
-  useEffect(() => {
-    if (!open) return;
-    const timeout = setTimeout(() => fetchProducts(search), 300);
-    return () => clearTimeout(timeout);
-  }, [search, open, fetchProducts]);
+  // Client-side search filtering (no API calls)
+  const filteredProducts = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return products;
+    return products.filter((p) => {
+      const name = (p.name || "").toLowerCase();
+      const sku = (p.sku || "").toLowerCase();
+      return name.includes(term) || sku.includes(term);
+    });
+  }, [products, search]);
+
+  const availableProducts = filteredProducts.filter(
+    (p) => !existingProductIds.includes(p.id)
+  );
 
   const toggleProduct = (id: string) => {
     setSelected((prev) => {
@@ -82,10 +114,6 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
     onAdd(selectedProducts);
     onClose();
   };
-
-  const availableProducts = products.filter(
-    (p) => !existingProductIds.includes(p.id)
-  );
 
   return (
     <Modal open={open} onClose={onClose} title="Add Products">

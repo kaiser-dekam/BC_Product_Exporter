@@ -26,7 +26,11 @@ import SectionEditor from "@/components/books/SectionEditor";
 import ProductPicker from "@/components/books/ProductPicker";
 import ExportPdfButton from "@/components/pdf/ExportPdfButton";
 
-interface BookProduct {
+// ---------------------------------------------------------------------------
+// Types — supports both products and header text blocks
+// ---------------------------------------------------------------------------
+export interface ProductItem {
+  type: "product";
   product_cache_id: string;
   name: string;
   sku: string;
@@ -35,10 +39,24 @@ interface BookProduct {
   claude_summary: string | null;
 }
 
+export interface HeaderItem {
+  type: "header";
+  id: string;
+  level: 1 | 2 | 3;
+  text: string;
+}
+
+export type SectionItem = ProductItem | HeaderItem;
+
+/** Return a unique drag-and-drop ID for any section item. */
+export function getItemId(item: SectionItem): string {
+  return item.type === "product" ? item.product_cache_id : item.id;
+}
+
 interface BookSection {
   id: string;
   title: string;
-  products: BookProduct[];
+  items: SectionItem[];
 }
 
 interface BookData {
@@ -55,6 +73,31 @@ interface BookData {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Migrate old books that stored `products` instead of `items`
+// ---------------------------------------------------------------------------
+function migrateSections(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rawSections: any[]
+): BookSection[] {
+  return rawSections.map((s) => ({
+    id: s.id,
+    title: s.title,
+    items: s.items
+      ? // New format — items already tagged with `type`
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (s.items as any[]).map((item) =>
+          item.type ? item : { ...item, type: "product" as const }
+        )
+      : // Old format — convert plain product objects
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (s.products || []).map((p: any) => ({ ...p, type: "product" as const })),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export default function BookEditorPage({
   params,
 }: {
@@ -71,13 +114,16 @@ export default function BookEditorPage({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSectionId, setPickerSectionId] = useState<string | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Load book
+  // -----------------------------------------------------------------------
+  // Load book (with migration for old `products` format)
+  // -----------------------------------------------------------------------
   const fetchBook = useCallback(async () => {
     try {
       const token = await getIdToken();
@@ -89,6 +135,10 @@ export default function BookEditorPage({
 
       if (!res.ok) throw new Error("Book not found");
       const data = await res.json();
+
+      // Migrate sections from old `products` format to new `items` format
+      data.sections = migrateSections(data.sections || []);
+
       setBook(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load book");
@@ -101,7 +151,9 @@ export default function BookEditorPage({
     fetchBook();
   }, [fetchBook]);
 
+  // -----------------------------------------------------------------------
   // Save book
+  // -----------------------------------------------------------------------
   const saveBook = useCallback(async (updatedBook: BookData) => {
     setSaving(true);
     try {
@@ -123,7 +175,10 @@ export default function BookEditorPage({
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to save");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Failed to save (${res.status})`);
+      }
       setSaveMessage("Saved!");
       setTimeout(() => setSaveMessage(null), 2000);
     } catch (err) {
@@ -134,20 +189,21 @@ export default function BookEditorPage({
     }
   }, [getIdToken, bookId]);
 
-  // Add section
+  // -----------------------------------------------------------------------
+  // Section CRUD
+  // -----------------------------------------------------------------------
   const addSection = useCallback(() => {
     if (!book) return;
     const newSection: BookSection = {
       id: `section_${Date.now()}`,
       title: "New Section",
-      products: [],
+      items: [],
     };
     const updated = { ...book, sections: [...book.sections, newSection] };
     setBook(updated);
     saveBook(updated);
   }, [book, saveBook]);
 
-  // Remove section
   const removeSection = useCallback((sectionId: string) => {
     if (!book) return;
     const updated = {
@@ -158,7 +214,6 @@ export default function BookEditorPage({
     saveBook(updated);
   }, [book, saveBook]);
 
-  // Rename section
   const renameSection = useCallback((sectionId: string, newTitle: string) => {
     if (!book) return;
     const updated = {
@@ -168,18 +223,31 @@ export default function BookEditorPage({
       ),
     };
     setBook(updated);
-    // Don't auto-save on every keystroke — save on blur would be better
-    // but for simplicity we debounce through a separate save button
+    // Don't auto-save on every keystroke
   }, [book]);
 
-  // Remove product from section
-  const removeProduct = useCallback((sectionId: string, productCacheId: string) => {
+  const saveSectionTitle = useCallback((sectionId: string, finalTitle: string) => {
+    if (!book) return;
+    const updated = {
+      ...book,
+      sections: book.sections.map((s) =>
+        s.id === sectionId ? { ...s, title: finalTitle } : s
+      ),
+    };
+    setBook(updated);
+    saveBook(updated);
+  }, [book, saveBook]);
+
+  // -----------------------------------------------------------------------
+  // Item management (products + headers)
+  // -----------------------------------------------------------------------
+  const removeItem = useCallback((sectionId: string, itemId: string) => {
     if (!book) return;
     const updated = {
       ...book,
       sections: book.sections.map((s) =>
         s.id === sectionId
-          ? { ...s, products: s.products.filter((p) => p.product_cache_id !== productCacheId) }
+          ? { ...s, items: s.items.filter((item) => getItemId(item) !== itemId) }
           : s
       ),
     };
@@ -187,17 +255,78 @@ export default function BookEditorPage({
     saveBook(updated);
   }, [book, saveBook]);
 
-  // Open product picker for a section
+  const reorderItems = useCallback((sectionId: string, reorderedItems: SectionItem[]) => {
+    if (!book) return;
+    const updated = {
+      ...book,
+      sections: book.sections.map((s) =>
+        s.id === sectionId ? { ...s, items: reorderedItems } : s
+      ),
+    };
+    setBook(updated);
+    saveBook(updated);
+  }, [book, saveBook]);
+
+  // -----------------------------------------------------------------------
+  // Header management
+  // -----------------------------------------------------------------------
+  const addHeader = useCallback((sectionId: string, level: 1 | 2 | 3) => {
+    if (!book) return;
+    const newHeader: HeaderItem = {
+      type: "header",
+      id: `header_${Date.now()}`,
+      level,
+      text: "",
+    };
+    const updated = {
+      ...book,
+      sections: book.sections.map((s) =>
+        s.id === sectionId
+          ? { ...s, items: [...s.items, newHeader] }
+          : s
+      ),
+    };
+    setBook(updated);
+    // Don't auto-save — wait for user to type header text
+  }, [book]);
+
+  const updateHeader = useCallback(
+    (sectionId: string, headerId: string, text: string, level: 1 | 2 | 3) => {
+      if (!book) return;
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                items: s.items.map((item) =>
+                  item.type === "header" && item.id === headerId
+                    ? { ...item, text, level }
+                    : item
+                ),
+              }
+            : s
+        ),
+      };
+      setBook(updated);
+      // Don't auto-save on keystroke
+    },
+    [book]
+  );
+
+  // -----------------------------------------------------------------------
+  // Product picker
+  // -----------------------------------------------------------------------
   const openProductPicker = useCallback((sectionId: string) => {
     setPickerSectionId(sectionId);
     setPickerOpen(true);
   }, []);
 
-  // Add products from picker
   const handleAddProducts = useCallback(
     (products: Array<{ id: string; name: string; sku: string; price: number; primary_image_url: string; claude_summary: string | null }>) => {
       if (!book || !pickerSectionId) return;
-      const newProducts: BookProduct[] = products.map((p) => ({
+      const newItems: ProductItem[] = products.map((p) => ({
+        type: "product" as const,
         product_cache_id: p.id,
         name: p.name,
         sku: p.sku,
@@ -210,7 +339,7 @@ export default function BookEditorPage({
         ...book,
         sections: book.sections.map((s) =>
           s.id === pickerSectionId
-            ? { ...s, products: [...s.products, ...newProducts] }
+            ? { ...s, items: [...s.items, ...newItems] }
             : s
         ),
       };
@@ -220,7 +349,42 @@ export default function BookEditorPage({
     [book, pickerSectionId, saveBook]
   );
 
-  // Drag and drop section reorder
+  // Get existing product IDs in the current picker section
+  const existingProductIds = pickerSectionId && book
+    ? book.sections
+        .find((s) => s.id === pickerSectionId)
+        ?.items
+        .filter((item): item is ProductItem => item.type === "product")
+        .map((p) => p.product_cache_id) || []
+    : [];
+
+  // -----------------------------------------------------------------------
+  // Collapse / expand
+  // -----------------------------------------------------------------------
+  const toggleCollapse = useCallback((sectionId: string) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  }, []);
+
+  const collapseAll = useCallback(() => {
+    if (!book) return;
+    setCollapsedSections(new Set(book.sections.map((s) => s.id)));
+  }, [book]);
+
+  const expandAll = useCallback(() => {
+    setCollapsedSections(new Set());
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Section drag-and-drop reorder
+  // -----------------------------------------------------------------------
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id || !book) return;
@@ -238,13 +402,9 @@ export default function BookEditorPage({
     saveBook(updated);
   }, [book, saveBook]);
 
-  // Get all existing product IDs in the current picker section
-  const existingProductIds = pickerSectionId && book
-    ? book.sections
-        .find((s) => s.id === pickerSectionId)
-        ?.products.map((p) => p.product_cache_id) || []
-    : [];
-
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -348,9 +508,28 @@ export default function BookEditorPage({
         <h3 className="text-sm font-semibold text-muted uppercase tracking-wider">
           Sections ({book.sections.length})
         </h3>
-        <Button size="sm" variant="secondary" onClick={addSection}>
-          + Add Section
-        </Button>
+        <div className="flex items-center gap-2">
+          {book.sections.length > 1 && (
+            <>
+              <button
+                onClick={collapseAll}
+                className="text-xs text-muted hover:text-text transition-colors"
+              >
+                Collapse All
+              </button>
+              <span className="text-muted/30">|</span>
+              <button
+                onClick={expandAll}
+                className="text-xs text-muted hover:text-text transition-colors"
+              >
+                Expand All
+              </button>
+            </>
+          )}
+          <Button size="sm" variant="secondary" onClick={addSection}>
+            + Add Section
+          </Button>
+        </div>
       </div>
 
       {book.sections.length === 0 ? (
@@ -376,11 +555,17 @@ export default function BookEditorPage({
                 key={section.id}
                 id={section.id}
                 title={section.title}
-                products={section.products}
-                onRemoveProduct={removeProduct}
+                items={section.items}
+                collapsed={collapsedSections.has(section.id)}
+                onToggleCollapse={toggleCollapse}
+                onRemoveItem={removeItem}
                 onRemoveSection={removeSection}
                 onRenameSection={renameSection}
+                onSaveSection={saveSectionTitle}
                 onAddProducts={openProductPicker}
+                onAddHeader={addHeader}
+                onUpdateHeader={updateHeader}
+                onReorderItems={reorderItems}
               />
             ))}
           </SortableContext>

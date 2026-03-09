@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { full_name, store_name } = body;
+  const { full_name, store_name, claude_system_prompt } = body;
 
   const profileRef = adminDb.collection("profiles").doc(decoded.uid);
   const existing = await profileRef.get();
@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
     const updates: Record<string, unknown> = { updated_at: FieldValue.serverTimestamp() };
     if (full_name !== undefined) updates.full_name = full_name;
     if (store_name !== undefined) updates.store_name = store_name;
+    if (claude_system_prompt !== undefined) updates.claude_system_prompt = claude_system_prompt;
     await profileRef.update(updates);
   } else {
     // Create new profile, check for legacy credentials migration
@@ -85,6 +86,7 @@ export async function GET(req: NextRequest) {
     role: data.role,
     has_bigcommerce_credentials: !!data.bigcommerce_credentials,
     has_anthropic_key: !!data.anthropic_api_key_encrypted,
+    claude_system_prompt: data.claude_system_prompt || null,
     csv_preferences: data.csv_preferences,
   });
 }

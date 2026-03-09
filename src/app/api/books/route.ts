@@ -13,13 +13,27 @@ export async function GET(req: NextRequest) {
     const snapshot = await adminDb
       .collection("books")
       .where("user_id", "==", uid)
-      .orderBy("updated_at", "desc")
       .get();
 
-    const books = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const books = snapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+      // Sort client-side to avoid requiring a composite Firestore index
+      .sort((a, b) => {
+        const aTime = (a as Record<string, unknown>).updated_at;
+        const bTime = (b as Record<string, unknown>).updated_at;
+        const aSeconds =
+          (aTime && typeof aTime === "object" && "seconds" in aTime
+            ? (aTime as { seconds: number }).seconds
+            : 0);
+        const bSeconds =
+          (bTime && typeof bTime === "object" && "seconds" in bTime
+            ? (bTime as { seconds: number }).seconds
+            : 0);
+        return bSeconds - aSeconds;
+      });
 
     return NextResponse.json({ books });
   } catch (err) {

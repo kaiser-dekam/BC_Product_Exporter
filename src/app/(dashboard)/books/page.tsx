@@ -39,9 +39,12 @@ export default function BooksPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!res.ok) throw new Error("Failed to load books");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Failed to load books (${res.status})`);
+      }
       const data = await res.json();
-      setBooks(data.books);
+      setBooks(data.books || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load books");
     } finally {

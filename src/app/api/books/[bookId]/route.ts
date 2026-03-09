@@ -78,12 +78,15 @@ export async function PUT(
     // Calculate page_count when sections are updated
     if (body.sections !== undefined) {
       const sections = body.sections as Array<{
+        items?: Array<{ type?: string }>;
         products?: Array<unknown>;
       }>;
       let pageCount = 0;
       for (const section of sections) {
         pageCount += 1; // section title page
-        pageCount += section.products?.length || 0;
+        // Support both new `items` format and old `products` format
+        const items = section.items || section.products || [];
+        pageCount += items.length;
       }
       updateData.page_count = pageCount;
     }

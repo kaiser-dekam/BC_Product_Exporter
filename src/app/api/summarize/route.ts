@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, getSiteSettings } from "@/lib/api-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { decrypt } from "@/lib/crypto";
 
-const DEFAULT_SYSTEM_PROMPT = `You are a product catalog specialist. Given product information, create a concise, professional summary suitable for a sales book. Include key features, specifications, and selling points. Keep it under 150 words.`;
+const DEFAULT_SYSTEM_PROMPT = `You are a product catalog specialist. Given product information, create a concise, professional summary suitable for a printed sales book.
+
+Format your response as exactly 5 or 6 bullet points using a dash prefix ("- "). Each bullet must be under 90 characters. Focus on key features, specifications, dimensions, materials, and selling points. Do not include a heading or intro text — only the bullet points.
+
+Example format:
+- Heavy-duty steel construction with powder-coated matte black finish
+- Supports up to 500 lbs with reinforced corner brackets
+- Dimensions: 48" W x 24" D x 36" H, ships fully assembled`;
 
 function buildUserMessage(product: Record<string, unknown>): string {
   return `Product: ${product.name ?? ""}
@@ -91,6 +98,10 @@ export async function POST(req: NextRequest) {
     systemPrompt = DEFAULT_SYSTEM_PROMPT;
   }
 
+  // Load site-wide model setting
+  const siteSettings = await getSiteSettings();
+  const claudeModel = siteSettings.default_claude_model;
+
   const errors: string[] = [];
   let summarized = 0;
 
@@ -122,7 +133,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: claudeModel,
           max_tokens: 500,
           system: systemPrompt,
           messages: [{ role: "user", content: userMessage }],
@@ -142,7 +153,7 @@ export async function POST(req: NextRequest) {
 
       await productRef.update({
         claude_summary: summaryText,
-        claude_model_used: "claude-sonnet-4-20250514",
+        claude_model_used: claudeModel,
         summarized_at: FieldValue.serverTimestamp(),
       });
 

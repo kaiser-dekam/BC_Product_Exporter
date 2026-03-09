@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   DEFAULT_SELECTED_FIELDS,
@@ -34,7 +34,33 @@ export default function CsvExporterPage() {
 
   // Credentials
   const [credentials, setCredentials] = useState<Credentials | null>(null);
+  const [usingSavedCredentials, setUsingSavedCredentials] = useState(false);
+  const [checkingCreds, setCheckingCreds] = useState(true);
   const [showCredentialModal, setShowCredentialModal] = useState(false);
+
+  // Check for saved credentials on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getIdToken();
+        if (!token || cancelled) return;
+        const res = await fetch("/api/profile", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (data.has_bigcommerce_credentials) {
+          setUsingSavedCredentials(true);
+        }
+      } catch {
+        // ignore — user can still enter credentials manually
+      } finally {
+        if (!cancelled) setCheckingCreds(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [getIdToken]);
 
   // Field selection & ordering
   const [selectedFields, setSelectedFields] = useState<string[]>(
@@ -124,7 +150,7 @@ export default function CsvExporterPage() {
   }, []);
 
   const handleExport = useCallback(async () => {
-    if (!credentials) return;
+    if (!credentials && !usingSavedCredentials) return;
     setLoading(true);
     setError(null);
     setCsvContent(null);
@@ -133,24 +159,31 @@ export default function CsvExporterPage() {
       const token = await getIdToken();
       if (!token) throw new Error("Not authenticated");
 
+      // When using saved credentials, omit the credentials field so the
+      // backend falls back to the encrypted profile credentials.
+      const payload: Record<string, unknown> = {
+        fields: fieldOrder,
+        include_variants: filters.includeVariants,
+        include_unavailable: filters.includeUnavailable,
+        include_hidden: filters.includeHidden,
+        custom_domain: customDomain || undefined,
+      };
+
+      if (credentials) {
+        payload.credentials = {
+          store_hash: credentials.store_hash,
+          client_id: credentials.client_id,
+          access_token: credentials.access_token,
+        };
+      }
+
       const res = await fetch("/api/csv/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          credentials: {
-            store_hash: credentials.store_hash,
-            client_id: credentials.client_id,
-            access_token: credentials.access_token,
-          },
-          fields: fieldOrder,
-          include_variants: filters.includeVariants,
-          include_unavailable: filters.includeUnavailable,
-          include_hidden: filters.includeHidden,
-          custom_domain: customDomain || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -171,15 +204,31 @@ export default function CsvExporterPage() {
     } finally {
       setLoading(false);
     }
-  }, [credentials, getIdToken, fieldOrder, filters, customDomain]);
+  }, [credentials, usingSavedCredentials, getIdToken, fieldOrder, filters, customDomain]);
 
   const handleDownload = useCallback(async () => {
-    if (!credentials) return;
+    if (!credentials && !usingSavedCredentials) return;
     setLoading(true);
 
     try {
       const token = await getIdToken();
       if (!token) throw new Error("Not authenticated");
+
+      const payload: Record<string, unknown> = {
+        fields: fieldOrder,
+        include_variants: filters.includeVariants,
+        include_unavailable: filters.includeUnavailable,
+        include_hidden: filters.includeHidden,
+        custom_domain: customDomain || undefined,
+      };
+
+      if (credentials) {
+        payload.credentials = {
+          store_hash: credentials.store_hash,
+          client_id: credentials.client_id,
+          access_token: credentials.access_token,
+        };
+      }
 
       const res = await fetch("/api/csv/download", {
         method: "POST",
@@ -187,18 +236,7 @@ export default function CsvExporterPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          credentials: {
-            store_hash: credentials.store_hash,
-            client_id: credentials.client_id,
-            access_token: credentials.access_token,
-          },
-          fields: fieldOrder,
-          include_variants: filters.includeVariants,
-          include_unavailable: filters.includeUnavailable,
-          include_hidden: filters.includeHidden,
-          custom_domain: customDomain || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -221,12 +259,29 @@ export default function CsvExporterPage() {
     } finally {
       setLoading(false);
     }
-  }, [credentials, getIdToken, fieldOrder, filters, customDomain]);
+  }, [credentials, usingSavedCredentials, getIdToken, fieldOrder, filters, customDomain]);
 
   // ---------------------------------------------------------------------------
-  // Gate: credentials required
+  // Loading while checking for saved credentials
   // ---------------------------------------------------------------------------
-  if (!credentials) {
+  if (checkingCreds) {
+    return (
+      <div className="max-w-5xl mx-auto">
+        <h1 className="text-2xl font-bold mb-2">CSV Exporter</h1>
+        <p className="text-muted mb-6">
+          Pull product data from BigCommerce and export to CSV.
+        </p>
+        <div className="flex justify-center py-12">
+          <Spinner size="lg" />
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gate: credentials required (skip if saved credentials detected)
+  // ---------------------------------------------------------------------------
+  if (!credentials && !usingSavedCredentials) {
     return (
       <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl font-bold mb-2">CSV Exporter</h1>
@@ -261,7 +316,8 @@ export default function CsvExporterPage() {
           </h2>
           <p className="text-muted text-sm max-w-md mb-6">
             Enter your BigCommerce API credentials to start exporting product
-            data as CSV files.
+            data as CSV files. You can also save credentials in Settings to
+            skip this step.
           </p>
           <Button onClick={() => setShowCredentialModal(true)} size="lg">
             Get Started
@@ -289,32 +345,39 @@ export default function CsvExporterPage() {
             Select fields, arrange column order, and export.
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowCredentialModal(true)}
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="flex items-center gap-2">
+          {usingSavedCredentials && !credentials && (
+            <span className="text-xs text-success bg-success/10 px-2 py-1 rounded-full">
+              Using saved credentials
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowCredentialModal(true)}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-          Change Credentials
-        </Button>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+            {usingSavedCredentials && !credentials ? "Override Credentials" : "Change Credentials"}
+          </Button>
+        </div>
       </div>
 
       {/* Column preview + custom domain */}
