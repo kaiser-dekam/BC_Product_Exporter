@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   DndContext,
   closestCenter,
@@ -24,12 +24,14 @@ import Badge from "@/components/ui/Badge";
 import type {
   SectionItem,
   ProductItem,
+  ProductVariant,
   HeaderItem,
+  MarkdownTextItem,
 } from "@/app/(dashboard)/books/[bookId]/page";
 import { getItemId } from "@/app/(dashboard)/books/[bookId]/page";
 
 // Re-export for convenience
-export type { SectionItem, ProductItem, HeaderItem };
+export type { SectionItem, ProductItem, ProductVariant, HeaderItem, MarkdownTextItem };
 
 interface SectionEditorProps {
   id: string;
@@ -45,8 +47,12 @@ interface SectionEditorProps {
   onSaveSection?: (sectionId: string, finalTitle: string) => void;
   onAddHeader: (sectionId: string, level: 1 | 2 | 3) => void;
   onUpdateHeader: (sectionId: string, headerId: string, text: string, level: 1 | 2 | 3) => void;
+  onAddText: (sectionId: string) => void;
+  onUpdateText: (sectionId: string, textId: string, content: string) => void;
   onReorderItems: (sectionId: string, items: SectionItem[]) => void;
   onUpdateProductDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
+  onUpdateProductVariants: (sectionId: string, productId: string, variants: ProductVariant[]) => void;
+  onUpdateProductOptions: (sectionId: string, productId: string, options: { show_main_price?: boolean; show_variants?: boolean }) => void;
   onUpdateLayout: (sectionId: string, layout: "1-col" | "2-col") => void;
 }
 
@@ -58,11 +64,15 @@ function SortableProductRow({
   sectionId,
   onRemove,
   onUpdateDescription,
+  onUpdateVariants,
+  onUpdateOptions,
 }: {
   product: ProductItem;
   sectionId: string;
   onRemove: (sectionId: string, itemId: string) => void;
   onUpdateDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
+  onUpdateVariants: (sectionId: string, productId: string, variants: ProductVariant[]) => void;
+  onUpdateOptions: (sectionId: string, productId: string, options: { show_main_price?: boolean; show_variants?: boolean }) => void;
 }) {
   const {
     attributes,
@@ -76,6 +86,10 @@ function SortableProductRow({
   const [editingDesc, setEditingDesc] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [draftSource, setDraftSource] = useState<"ai" | "custom">("ai");
+  const [editingVariants, setEditingVariants] = useState(false);
+  const [variantName, setVariantName] = useState("");
+  const [variantSku, setVariantSku] = useState("");
+  const [variantPrice, setVariantPrice] = useState("");
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -98,6 +112,29 @@ function SortableProductRow({
 
   const activeSource = product.description_source ?? (product.claude_summary ? "ai" : "custom");
   const hasCustom = !!product.user_description;
+  const variants = product.variants ?? [];
+  const showMainPrice = product.show_main_price ?? true;
+  const showVariants = product.show_variants ?? true;
+
+  const addVariant = () => {
+    const name = variantName.trim();
+    const price = parseFloat(variantPrice);
+    if (!name || isNaN(price)) return;
+    const newVariant: ProductVariant = {
+      id: `var_${Date.now()}`,
+      name,
+      sku: variantSku.trim() || undefined,
+      price,
+    };
+    onUpdateVariants(sectionId, product.product_cache_id, [...variants, newVariant]);
+    setVariantName("");
+    setVariantSku("");
+    setVariantPrice("");
+  };
+
+  const removeVariant = (variantId: string) => {
+    onUpdateVariants(sectionId, product.product_cache_id, variants.filter((v) => v.id !== variantId));
+  };
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -146,6 +183,24 @@ function SortableProductRow({
         ) : product.claude_summary ? (
           <Badge variant="success" className="flex-shrink-0 text-[10px]">AI</Badge>
         ) : null}
+
+        {/* Variant count badge */}
+        {variants.length > 0 && (
+          <Badge variant="info" className="flex-shrink-0 text-[10px]">
+            {variants.length} var{variants.length !== 1 ? "s" : ""}
+          </Badge>
+        )}
+
+        {/* Edit variants button */}
+        <button
+          onClick={() => setEditingVariants(!editingVariants)}
+          className={`transition-colors p-1 flex-shrink-0 ${editingVariants ? "text-accent" : "text-muted hover:text-accent"}`}
+          title="Edit variants"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+          </svg>
+        </button>
 
         {/* Edit description button */}
         <button
@@ -224,6 +279,86 @@ function SortableProductRow({
           <div className="flex items-center justify-end gap-2 mt-3">
             <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)}>Cancel</Button>
             <Button size="sm" onClick={saveDesc}>Save</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Inline variants editor */}
+      {editingVariants && (
+        <div className="mt-1 mb-2 rounded-lg border border-border bg-surface/50 p-3">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-medium text-text">Variants</span>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showMainPrice}
+                  onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_main_price: e.target.checked })}
+                  className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+                />
+                Show main price
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showVariants}
+                  onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_variants: e.target.checked })}
+                  className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+                />
+                Show variants
+              </label>
+            </div>
+          </div>
+
+          {/* Existing variants */}
+          {variants.length > 0 && (
+            <div className="space-y-1 mb-3">
+              {variants.map((v) => (
+                <div key={v.id} className="flex items-center gap-2 p-1.5 rounded bg-white/5 text-xs">
+                  <span className="flex-1 font-medium truncate">{v.name}</span>
+                  {v.sku && <span className="text-muted flex-shrink-0">{v.sku}</span>}
+                  <span className="text-text font-medium flex-shrink-0">${v.price.toFixed(2)}</span>
+                  <button
+                    onClick={() => removeVariant(v.id)}
+                    className="text-muted hover:text-danger transition-colors p-0.5 flex-shrink-0"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add variant form */}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={variantName}
+              onChange={(e) => setVariantName(e.target.value)}
+              className="flex-1 text-xs bg-surface border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-accent"
+              placeholder="Variant name..."
+            />
+            <input
+              type="text"
+              value={variantSku}
+              onChange={(e) => setVariantSku(e.target.value)}
+              className="w-20 text-xs bg-surface border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-accent"
+              placeholder="SKU"
+            />
+            <input
+              type="number"
+              value={variantPrice}
+              onChange={(e) => setVariantPrice(e.target.value)}
+              className="w-24 text-xs bg-surface border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-accent"
+              placeholder="Price"
+              step="0.01"
+              min="0"
+            />
+            <Button size="sm" onClick={addVariant} disabled={!variantName.trim() || !variantPrice}>
+              Add
+            </Button>
           </div>
         </div>
       )}
@@ -326,6 +461,157 @@ function SortableHeaderRow({
 }
 
 // ---------------------------------------------------------------------------
+// Sortable markdown text block
+// ---------------------------------------------------------------------------
+function SortableTextRow({
+  item,
+  sectionId,
+  onRemove,
+  onUpdate,
+}: {
+  item: MarkdownTextItem;
+  sectionId: string;
+  onRemove: (sectionId: string, itemId: string) => void;
+  onUpdate: (sectionId: string, textId: string, content: string) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="rounded-lg border border-border bg-surface/30 hover:bg-surface/50 transition-colors"
+    >
+      {/* Top bar */}
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border/50">
+        <button
+          className="cursor-grab text-muted/40 hover:text-muted p-0.5 flex-shrink-0"
+          {...attributes}
+          {...listeners}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+          </svg>
+        </button>
+        <Badge variant="default" className="flex-shrink-0 text-[10px]">Text</Badge>
+        <span className="flex-1 text-xs text-muted truncate">
+          {item.content ? item.content.slice(0, 60) + (item.content.length > 60 ? "…" : "") : "Empty text block"}
+        </span>
+        <button
+          onClick={() => onRemove(sectionId, item.id)}
+          className="text-muted hover:text-danger transition-colors p-1 flex-shrink-0"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Textarea */}
+      <div className="p-2">
+        <textarea
+          value={item.content}
+          onChange={(e) => onUpdate(sectionId, item.id, e.target.value)}
+          className="w-full text-xs bg-transparent border-none focus:outline-none resize-none text-text leading-relaxed placeholder:text-muted/50"
+          rows={4}
+          placeholder={"Enter markdown text…\nUse **bold**, *italic*, or - bullet points"}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add-item dropdown (replaces separate Add / Header / Text buttons)
+// ---------------------------------------------------------------------------
+function AddItemDropdown({
+  sectionId,
+  onAddProducts,
+  onAddText,
+  onAddHeader,
+}: {
+  sectionId: string;
+  onAddProducts: (sectionId: string) => void;
+  onAddText: (sectionId: string) => void;
+  onAddHeader: (sectionId: string, level: 1 | 2 | 3) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const choose = (action: () => void) => {
+    action();
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
+        + Add
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-40 bg-card border border-border rounded-lg shadow-xl z-30 py-1">
+          <button
+            onClick={() => choose(() => onAddProducts(sectionId))}
+            className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors"
+          >
+            Product
+          </button>
+          <button
+            onClick={() => choose(() => onAddText(sectionId))}
+            className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors"
+          >
+            Text Box
+          </button>
+          <button
+            onClick={() => choose(() => onAddHeader(sectionId, 1))}
+            className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors"
+          >
+            H1 Header
+          </button>
+          <button
+            onClick={() => choose(() => onAddHeader(sectionId, 2))}
+            className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors"
+          >
+            H2 Header
+          </button>
+          <button
+            onClick={() => choose(() => onAddHeader(sectionId, 3))}
+            className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors"
+          >
+            H3 Header
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Section editor
 // ---------------------------------------------------------------------------
 export default function SectionEditor({
@@ -342,8 +628,12 @@ export default function SectionEditor({
   onAddProducts,
   onAddHeader,
   onUpdateHeader,
+  onAddText,
+  onUpdateText,
   onReorderItems,
   onUpdateProductDescription,
+  onUpdateProductVariants,
+  onUpdateProductOptions,
   onUpdateLayout,
 }: SectionEditorProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -376,6 +666,7 @@ export default function SectionEditor({
 
   const productCount = items.filter((i) => i.type === "product").length;
   const headerCount = items.filter((i) => i.type === "header").length;
+  const textCount = items.filter((i) => i.type === "text").length;
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -421,6 +712,7 @@ export default function SectionEditor({
           <span className="text-xs text-muted flex-shrink-0">
             {productCount} {productCount === 1 ? "product" : "products"}
             {headerCount > 0 && ` · ${headerCount} ${headerCount === 1 ? "header" : "headers"}`}
+            {textCount > 0 && ` · ${textCount} ${textCount === 1 ? "text" : "texts"}`}
           </span>
 
           {/* Layout toggle */}
@@ -445,26 +737,13 @@ export default function SectionEditor({
             </button>
           </div>
 
-          <Button size="sm" variant="ghost" onClick={() => onAddProducts(id)}>
-            + Add
-          </Button>
-
-          {/* Add Header dropdown */}
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) {
-                onAddHeader(id, Number(e.target.value) as 1 | 2 | 3);
-                e.target.value = "";
-              }
-            }}
-            className="bg-surface border border-border rounded-lg px-2 py-1 text-xs text-muted hover:text-text focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
-          >
-            <option value="">+ Header</option>
-            <option value="1">H1 — Large</option>
-            <option value="2">H2 — Medium</option>
-            <option value="3">H3 — Small</option>
-          </select>
+          {/* Add item dropdown */}
+          <AddItemDropdown
+            sectionId={id}
+            onAddProducts={onAddProducts}
+            onAddText={onAddText}
+            onAddHeader={onAddHeader}
+          />
 
           <Button size="sm" variant="danger" onClick={() => onRemoveSection(id)}>
             Remove
@@ -477,7 +756,7 @@ export default function SectionEditor({
             {/* Items list */}
             {items.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted border border-dashed border-border rounded-xl">
-                No items in this section. Click &quot;+ Add&quot; for products or &quot;+ Header&quot; for text.
+                No items in this section. Click &quot;+ Add&quot; to add products, headers, or text.
               </div>
             ) : (
               <DndContext
@@ -498,14 +777,24 @@ export default function SectionEditor({
                           sectionId={id}
                           onRemove={onRemoveItem}
                           onUpdateDescription={onUpdateProductDescription}
+                          onUpdateVariants={onUpdateProductVariants}
+                          onUpdateOptions={onUpdateProductOptions}
                         />
-                      ) : (
+                      ) : item.type === "header" ? (
                         <SortableHeaderRow
                           key={item.id}
                           header={item}
                           sectionId={id}
                           onRemove={onRemoveItem}
                           onUpdate={onUpdateHeader}
+                        />
+                      ) : (
+                        <SortableTextRow
+                          key={item.id}
+                          item={item}
+                          sectionId={id}
+                          onRemove={onRemoveItem}
+                          onUpdate={onUpdateText}
                         />
                       )
                     )}

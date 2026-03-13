@@ -13,12 +13,14 @@ interface BookCardProps {
     page_count: number;
     sections?: Array<{ id: string; title: string; products: unknown[] }>;
     updated_at?: { _seconds?: number; seconds?: number };
+    is_owned_by_me?: boolean;
   };
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
 export default function BookCard({ book, onEdit, onDelete }: BookCardProps) {
+  const isOwned = book.is_owned_by_me !== false;
   const sectionCount = book.sections?.length || 0;
   const productCount = book.sections?.reduce((sum, s) => sum + (s.products?.length || 0), 0) || 0;
   const updatedAt = book.updated_at?._seconds || book.updated_at?.seconds;
@@ -48,15 +50,22 @@ export default function BookCard({ book, onEdit, onDelete }: BookCardProps) {
         <span>{sectionCount} section{sectionCount !== 1 ? "s" : ""}</span>
         <span>{productCount} product{productCount !== 1 ? "s" : ""}</span>
         {dateStr && <span>Updated {dateStr}</span>}
+        {!isOwned && (
+          <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium">
+            Shared
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2 mt-1">
         <Button size="sm" onClick={() => onEdit(book.id)}>
           Edit Book
         </Button>
-        <Button size="sm" variant="danger" onClick={() => onDelete(book.id)}>
-          Delete
-        </Button>
+        {isOwned && (
+          <Button size="sm" variant="danger" onClick={() => onDelete(book.id)}>
+            Delete
+          </Button>
+        )}
       </div>
     </Card>
   );

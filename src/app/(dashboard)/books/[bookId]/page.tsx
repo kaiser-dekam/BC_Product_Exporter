@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, use } from "react";
+import { useState, useCallback, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -29,6 +29,13 @@ import ExportPdfButton from "@/components/pdf/ExportPdfButton";
 // ---------------------------------------------------------------------------
 // Types — supports both products and header text blocks
 // ---------------------------------------------------------------------------
+export interface ProductVariant {
+  id: string;
+  name: string;
+  sku?: string;
+  price: number;
+}
+
 export interface ProductItem {
   type: "product";
   product_cache_id: string;
@@ -40,6 +47,9 @@ export interface ProductItem {
   user_description: string | null;       // user-written custom description
   description_source: "ai" | "custom";  // which to render in PDF
   is_custom?: boolean;                   // true for manually created products
+  variants?: ProductVariant[];
+  show_main_price?: boolean;             // default true — hide product-level price in PDF
+  show_variants?: boolean;               // default true — hide variant rows in PDF
 }
 
 export interface HeaderItem {
@@ -49,7 +59,13 @@ export interface HeaderItem {
   text: string;
 }
 
-export type SectionItem = ProductItem | HeaderItem;
+export interface MarkdownTextItem {
+  type: "text";
+  id: string;
+  content: string;
+}
+
+export type SectionItem = ProductItem | HeaderItem | MarkdownTextItem;
 
 /** Return a unique drag-and-drop ID for any section item. */
 export function getItemId(item: SectionItem): string {
@@ -98,8 +114,12 @@ function migrateSections(
               ...item,
               user_description: item.user_description ?? null,
               description_source: item.description_source ?? "ai",
+              variants: item.variants ?? [],
+              show_main_price: item.show_main_price ?? true,
+              show_variants: item.show_variants ?? true,
             };
           }
+          if (item.type === "text") return item;
           return item;
         })
       : // Old format — convert plain product objects
@@ -134,6 +154,14 @@ export default function BookEditorPage({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSectionId, setPickerSectionId] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
+  // Version snapshots
+  const [versions, setVersions] = useState<Array<{ id: string; label: string; created_at: string }>>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionLabel, setVersionLabel] = useState("");
+  const [savingVersion, setSavingVersion] = useState(false);
+  const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
+  const versionsRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -274,6 +302,126 @@ export default function BookEditorPage({
   }, [book, getIdToken, saveBook]);
 
   // -----------------------------------------------------------------------
+  // Version snapshots
+  // -----------------------------------------------------------------------
+  const fetchVersions = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/books/${bookId}/versions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setVersions(data.versions ?? []);
+    } catch {
+      // Silently fail — versions are non-critical
+    }
+  }, [getIdToken, bookId]);
+
+  useEffect(() => {
+    fetchVersions();
+  }, [fetchVersions]);
+
+  // Close versions dropdown when clicking outside
+  useEffect(() => {
+    if (!versionsOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (versionsRef.current && !versionsRef.current.contains(e.target as Node)) {
+        setVersionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [versionsOpen]);
+
+  const saveVersion = useCallback(async (label: string) => {
+    if (!label.trim()) return;
+    setSavingVersion(true);
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/books/${bookId}/versions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ label: label.trim() }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to save version");
+      }
+
+      const newVersion = await res.json();
+      setVersions((prev) => [newVersion, ...prev]);
+      setVersionLabel("");
+      setSaveMessage("Version saved!");
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save version");
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSavingVersion(false);
+    }
+  }, [getIdToken, bookId]);
+
+  const restoreVersion = useCallback(async (versionId: string) => {
+    setRestoringVersion(versionId);
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/books/${bookId}/versions/${versionId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to restore version");
+      }
+
+      // Re-fetch the book to get the restored state
+      await fetchBook();
+      setVersionsOpen(false);
+      setSaveMessage("Version restored!");
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to restore version");
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setRestoringVersion(null);
+    }
+  }, [getIdToken, bookId, fetchBook]);
+
+  const deleteVersion = useCallback(async (versionId: string) => {
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/books/${bookId}/versions/${versionId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to delete version");
+      }
+
+      setVersions((prev) => prev.filter((v) => v.id !== versionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete version");
+      setTimeout(() => setError(null), 5000);
+    }
+  }, [getIdToken, bookId]);
+
+  // -----------------------------------------------------------------------
   // Section CRUD
   // -----------------------------------------------------------------------
   const addSection = useCallback(() => {
@@ -399,6 +547,48 @@ export default function BookEditorPage({
   );
 
   // -----------------------------------------------------------------------
+  // Markdown text blocks
+  // -----------------------------------------------------------------------
+  const addText = useCallback((sectionId: string) => {
+    if (!book) return;
+    const newText: MarkdownTextItem = {
+      type: "text",
+      id: `text_${Date.now()}`,
+      content: "",
+    };
+    const updated = {
+      ...book,
+      sections: book.sections.map((s) =>
+        s.id === sectionId ? { ...s, items: [...s.items, newText] } : s
+      ),
+    };
+    setBook(updated);
+  }, [book]);
+
+  const updateText = useCallback(
+    (sectionId: string, textId: string, content: string) => {
+      if (!book) return;
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                items: s.items.map((item) =>
+                  item.type === "text" && item.id === textId
+                    ? { ...item, content }
+                    : item
+                ),
+              }
+            : s
+        ),
+      };
+      setBook(updated);
+    },
+    [book]
+  );
+
+  // -----------------------------------------------------------------------
   // Product description editing
   // -----------------------------------------------------------------------
   const updateProductDescription = useCallback(
@@ -413,6 +603,57 @@ export default function BookEditorPage({
                 items: s.items.map((item) =>
                   item.type === "product" && item.product_cache_id === productId
                     ? { ...item, user_description, description_source }
+                    : item
+                ),
+              }
+            : s
+        ),
+      };
+      setBook(updated);
+      saveBook(updated);
+    },
+    [book, saveBook]
+  );
+
+  // -----------------------------------------------------------------------
+  // Product variants
+  // -----------------------------------------------------------------------
+  const updateProductVariants = useCallback(
+    (sectionId: string, productId: string, variants: ProductVariant[]) => {
+      if (!book) return;
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                items: s.items.map((item) =>
+                  item.type === "product" && item.product_cache_id === productId
+                    ? { ...item, variants }
+                    : item
+                ),
+              }
+            : s
+        ),
+      };
+      setBook(updated);
+      saveBook(updated);
+    },
+    [book, saveBook]
+  );
+
+  const updateProductOptions = useCallback(
+    (sectionId: string, productId: string, options: { show_main_price?: boolean; show_variants?: boolean }) => {
+      if (!book) return;
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                items: s.items.map((item) =>
+                  item.type === "product" && item.product_cache_id === productId
+                    ? { ...item, ...options }
                     : item
                 ),
               }
@@ -601,6 +842,106 @@ export default function BookEditorPage({
             subtitle={book.cover_config.subtitle}
             sections={book.sections}
           />
+
+          {/* Versions dropdown */}
+          <div className="relative" ref={versionsRef}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setVersionsOpen(!versionsOpen)}
+            >
+              Versions{versions.length > 0 ? ` (${versions.length})` : ""}
+              <svg className={`w-3 h-3 ml-1 transition-transform ${versionsOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </Button>
+
+            {versionsOpen && (
+              <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                {/* Save new version */}
+                <div className="p-3 border-b border-border">
+                  <p className="text-xs text-muted mb-2">Save current state as a version</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={versionLabel}
+                      onChange={(e) => setVersionLabel(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && versionLabel.trim()) {
+                          saveVersion(versionLabel);
+                        }
+                      }}
+                      className="flex-1 text-xs bg-white/5 border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-accent placeholder:text-muted/50"
+                      placeholder="Version label..."
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => saveVersion(versionLabel)}
+                      loading={savingVersion}
+                      disabled={!versionLabel.trim()}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Versions list */}
+                <div className="max-h-64 overflow-y-auto">
+                  {versions.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-muted">
+                      No saved versions yet
+                    </div>
+                  ) : (
+                    versions.map((v) => (
+                      <div
+                        key={v.id}
+                        className="flex items-center gap-2 px-3 py-2 border-b border-border/50 last:border-b-0 hover:bg-white/5 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{v.label}</p>
+                          <p className="text-[10px] text-muted">
+                            {new Date(v.created_at).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (confirm("Restore this version? The current book state will be overwritten.")) {
+                              restoreVersion(v.id);
+                            }
+                          }}
+                          disabled={restoringVersion === v.id}
+                          className="text-[10px] text-accent hover:text-accent/80 transition-colors font-medium flex-shrink-0 disabled:opacity-50"
+                        >
+                          {restoringVersion === v.id ? "Restoring..." : "Restore"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm("Delete this saved version?")) {
+                              deleteVersion(v.id);
+                            }
+                          }}
+                          className="text-muted hover:text-danger transition-colors p-0.5 flex-shrink-0"
+                          title="Delete version"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <Button onClick={() => saveBook(book)} loading={saving} size="sm">
             Save
           </Button>
@@ -693,8 +1034,12 @@ export default function BookEditorPage({
                 onAddProducts={openProductPicker}
                 onAddHeader={addHeader}
                 onUpdateHeader={updateHeader}
+                onAddText={addText}
+                onUpdateText={updateText}
                 onReorderItems={reorderItems}
                 onUpdateProductDescription={updateProductDescription}
+                onUpdateProductVariants={updateProductVariants}
+                onUpdateProductOptions={updateProductOptions}
                 onUpdateLayout={updateSectionLayout}
               />
             ))}

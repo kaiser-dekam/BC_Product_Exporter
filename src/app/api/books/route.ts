@@ -7,18 +7,37 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
+  const email = auth.user.email;
 
   try {
     const supabase = createAdminClient();
+
+    // Find profiles that have granted the current user collaborator access
+    let sharedUserIds: string[] = [];
+    if (email) {
+      const { data: sharedProfiles } = await supabase
+        .from("profiles")
+        .select("id")
+        .contains("collaborator_emails", [email]);
+      sharedUserIds = sharedProfiles?.map((p: { id: string }) => p.id) || [];
+    }
+
+    const allUserIds = [uid, ...sharedUserIds];
     const { data: books, error } = await supabase
       .from("books")
       .select("*")
-      .eq("user_id", uid)
+      .in("user_id", allUserIds)
       .order("updated_at", { ascending: false });
 
     if (error) throw error;
 
-    return NextResponse.json({ books: books || [] });
+    // Tag each book with whether the current user is the owner
+    const tagged = (books || []).map((b) => ({
+      ...b,
+      is_owned_by_me: b.user_id === uid,
+    }));
+
+    return NextResponse.json({ books: tagged });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch books";

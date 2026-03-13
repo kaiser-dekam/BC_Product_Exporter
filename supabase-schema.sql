@@ -164,3 +164,26 @@ CREATE POLICY books_delete ON books FOR DELETE USING (auth.uid() = user_id);
 
 -- site_settings (readable by all authenticated users)
 CREATE POLICY site_settings_select ON site_settings FOR SELECT USING (auth.role() = 'authenticated');
+
+-- ============================================================================
+-- 7. book_versions (manual version snapshots for rollback)
+-- ============================================================================
+CREATE TABLE book_versions (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  book_id      UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  user_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  label        TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  cover_config JSONB NOT NULL DEFAULT '{}',
+  sections     JSONB NOT NULL DEFAULT '[]',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_book_versions_book_created ON book_versions (book_id, created_at DESC);
+
+ALTER TABLE book_versions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY book_versions_select ON book_versions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY book_versions_insert ON book_versions FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY book_versions_delete ON book_versions FOR DELETE USING (auth.uid() = user_id);

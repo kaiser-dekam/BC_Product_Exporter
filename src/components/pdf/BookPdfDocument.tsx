@@ -272,6 +272,87 @@ const styles = StyleSheet.create({
     color: "#1a1a1a",
   },
 
+  // Markdown text block -----------------------------------------------------
+  textBlock: {
+    marginVertical: 3,
+    paddingLeft: 6,
+    borderLeftWidth: 1.5,
+    borderLeftColor: "#d1d5db",
+  },
+  textParagraph: {
+    fontSize: 8,
+    color: "#1a1a1a",
+    lineHeight: 1.5,
+    marginBottom: 3,
+  },
+  textBulletRow: {
+    flexDirection: "row",
+    marginBottom: 2,
+  },
+  textBulletDot: {
+    fontSize: 8,
+    color: "#1a1a1a",
+    width: 10,
+  },
+  textBulletText: {
+    fontSize: 8,
+    color: "#1a1a1a",
+    flex: 1,
+    lineHeight: 1.5,
+  },
+
+  // Variant rows (1-col) ----------------------------------------------------
+  variantRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 8,
+    paddingLeft: IMAGE_SIZE + IMAGE_GAP,
+  },
+  variantName: {
+    width: NAME_COL,
+    fontSize: 6,
+    color: "#374151",
+    paddingLeft: 8,
+  },
+  variantSku: {
+    width: SKU_COL,
+    fontSize: 5.5,
+    color: "#6b7280",
+  },
+  variantPrice: {
+    width: PRICE_COL,
+    fontSize: 7,
+    fontWeight: "bold",
+    color: "#1a1a1a",
+    textAlign: "right" as const,
+  },
+
+  // Variant rows (2-col) ---------------------------------------------------
+  variantRow2col: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 7,
+    paddingLeft: IMG_SIZE_2COL + IMG_GAP_2COL,
+  },
+  variantName2col: {
+    width: NAME_COL_2COL,
+    fontSize: 5,
+    color: "#374151",
+    paddingLeft: 6,
+  },
+  variantSku2col: {
+    width: SKU_COL_2COL,
+    fontSize: 4.5,
+    color: "#6b7280",
+  },
+  variantPrice2col: {
+    width: PRICE_COL_2COL,
+    fontSize: 6,
+    fontWeight: "bold",
+    color: "#1a1a1a",
+    textAlign: "right" as const,
+  },
+
   // Two-column layout -------------------------------------------------------
   twoColPair: {
     flexDirection: "row",
@@ -336,6 +417,13 @@ const styles = StyleSheet.create({
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+interface ProductVariant {
+  id: string;
+  name: string;
+  sku?: string;
+  price: number;
+}
+
 interface ProductItem {
   type: "product";
   product_cache_id: string;
@@ -350,6 +438,9 @@ interface ProductItem {
   width?: number;
   height?: number;
   depth?: number;
+  variants?: ProductVariant[];
+  show_main_price?: boolean;
+  show_variants?: boolean;
 }
 
 interface HeaderItem {
@@ -359,7 +450,13 @@ interface HeaderItem {
   text: string;
 }
 
-type SectionItem = ProductItem | HeaderItem;
+interface MarkdownTextItem {
+  type: "text";
+  id: string;
+  content: string;
+}
+
+type SectionItem = ProductItem | HeaderItem | MarkdownTextItem;
 
 interface BookSection {
   id: string;
@@ -426,6 +523,7 @@ function parseBullets(summary: string): string[] {
 // ---------------------------------------------------------------------------
 type Pair =
   | { kind: "header"; item: HeaderItem; key: string }
+  | { kind: "text"; item: MarkdownTextItem; key: string }
   | { kind: "pair"; left: ProductItem; right: ProductItem | null; key: string };
 
 function buildPairs(items: SectionItem[]): Pair[] {
@@ -439,6 +537,12 @@ function buildPairs(items: SectionItem[]): Pair[] {
         pending = null;
       }
       result.push({ kind: "header", item, key: item.id });
+    } else if (item.type === "text") {
+      if (pending) {
+        result.push({ kind: "pair", left: pending, right: null, key: `pair-${pending.product_cache_id}` });
+        pending = null;
+      }
+      result.push({ kind: "text", item, key: item.id });
     } else {
       if (pending) {
         result.push({ kind: "pair", left: pending, right: item, key: `pair-${pending.product_cache_id}` });
@@ -458,44 +562,72 @@ function buildPairs(items: SectionItem[]): Pair[] {
 // Product cell for 2-col layout
 // ---------------------------------------------------------------------------
 function ProductCell2Col({ product }: { product: ProductItem }) {
-  const effectiveDescription =
+  const customDesc =
     product.description_source === "custom" && product.user_description
       ? product.user_description
-      : product.claude_summary;
-  const bullets = effectiveDescription ? parseBullets(effectiveDescription) : [];
+      : null;
+  const customBullets = customDesc ? parseBullets(customDesc) : [];
+  // Fall back to AI summary if the custom description produces no parseable bullets
+  const bullets =
+    customBullets.length > 0
+      ? customBullets
+      : product.claude_summary
+      ? parseBullets(product.claude_summary)
+      : [];
+
+  const variants = product.variants ?? [];
+  const showMainPrice = product.show_main_price ?? true;
+  const showVariants = (product.show_variants ?? true) && variants.length > 0;
 
   return (
-    <View style={styles.productRow2col}>
-      {/* Image */}
-      <View style={styles.productImageCol2col}>
-        {product.primary_image_url ? (
-          <Image src={product.primary_image_url} style={styles.productImage2col} />
-        ) : (
-          <View style={styles.productImagePlaceholder2col}>
-            <Text style={{ fontSize: 4, color: "#1a1a1a" }}>No img</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Info area */}
-      <View style={styles.productInfoCol2col}>
-        <View style={styles.topLine}>
-          <Text style={styles.productName2col}>{truncate(product.name, 40)}</Text>
-          <Text style={styles.productSku2col}>{product.sku || ""}</Text>
-          <Text style={styles.productPrice2col}>${product.price.toFixed(2)}</Text>
+    <View style={{ width: COL_WIDTH }}>
+      <View style={styles.productRow2col}>
+        {/* Image */}
+        <View style={styles.productImageCol2col}>
+          {product.primary_image_url ? (
+            <Image src={product.primary_image_url} style={styles.productImage2col} />
+          ) : (
+            <View style={styles.productImagePlaceholder2col}>
+              <Text style={{ fontSize: 4, color: "#1a1a1a" }}>No img</Text>
+            </View>
+          )}
         </View>
 
-        {bullets.length > 0 && (
-          <View style={styles.bulletArea}>
-            {bullets.map((b, i) => (
-              <View key={i} style={styles.bulletRow}>
-                <Text style={styles.bulletDot}>{"•"}</Text>
-                <Text style={styles.bulletText}>{truncate(b, BULLET_MAX_CHARS_2COL)}</Text>
-              </View>
-            ))}
+        {/* Info area */}
+        <View style={styles.productInfoCol2col}>
+          <View style={styles.topLine}>
+            <Text style={styles.productName2col}>{truncate(product.name, 40)}</Text>
+            <Text style={styles.productSku2col}>{product.sku || ""}</Text>
+            <Text style={styles.productPrice2col}>
+              {showMainPrice ? `$${product.price.toFixed(2)}` : ""}
+            </Text>
           </View>
-        )}
+
+          {bullets.length > 0 && (
+            <View style={styles.bulletArea}>
+              {bullets.map((b, i) => (
+                <View key={i} style={styles.bulletRow}>
+                  <Text style={styles.bulletDot}>{"•"}</Text>
+                  <Text style={styles.bulletText}>{truncate(b, BULLET_MAX_CHARS_2COL)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       </View>
+
+      {/* Variant rows */}
+      {showVariants && (
+        <View>
+          {variants.map((v) => (
+            <View key={v.id} style={styles.variantRow2col}>
+              <Text style={styles.variantName2col}>{truncate(v.name, 40)}</Text>
+              <Text style={styles.variantSku2col}>{v.sku || ""}</Text>
+              <Text style={styles.variantPrice2col}>${v.price.toFixed(2)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -504,54 +636,80 @@ function ProductCell2Col({ product }: { product: ProductItem }) {
 // Product row (horizontal with full-width bullet points)
 // ---------------------------------------------------------------------------
 function ProductRow({ product }: { product: ProductItem }) {
-  const effectiveDescription =
+  const customDesc =
     product.description_source === "custom" && product.user_description
       ? product.user_description
-      : product.claude_summary;
-  const bullets = effectiveDescription ? parseBullets(effectiveDescription) : [];
+      : null;
+  const customBullets = customDesc ? parseBullets(customDesc) : [];
+  // Fall back to AI summary if the custom description produces no parseable bullets
+  const bullets =
+    customBullets.length > 0
+      ? customBullets
+      : product.claude_summary
+      ? parseBullets(product.claude_summary)
+      : [];
+
+  const variants = product.variants ?? [];
+  const showMainPrice = product.show_main_price ?? true;
+  const showVariants = (product.show_variants ?? true) && variants.length > 0;
 
   return (
-    <View style={styles.productRow} wrap={false}>
-      {/* Image */}
-      <View style={styles.productImageCol}>
-        {product.primary_image_url ? (
-          <Image src={product.primary_image_url} style={styles.productImage} />
-        ) : (
-          <View style={styles.productImagePlaceholder}>
-            <Text style={{ fontSize: 5, color: "#1a1a1a" }}>No img</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Info area */}
-      <View style={styles.productInfoCol}>
-        {/* Top line: Name | SKU | Price */}
-        <View style={styles.topLine}>
-          <Text style={styles.productName}>
-            {truncate(product.name, 70)}
-          </Text>
-          <Text style={styles.productSku}>
-            {product.sku || ""}
-          </Text>
-          <Text style={styles.productPrice}>
-            ${product.price.toFixed(2)}
-          </Text>
+    <View wrap={false}>
+      <View style={{ ...styles.productRow, ...(showVariants ? { borderBottomWidth: 0, marginBottom: 0 } : {}) }}>
+        {/* Image */}
+        <View style={styles.productImageCol}>
+          {product.primary_image_url ? (
+            <Image src={product.primary_image_url} style={styles.productImage} />
+          ) : (
+            <View style={styles.productImagePlaceholder}>
+              <Text style={{ fontSize: 5, color: "#1a1a1a" }}>No img</Text>
+            </View>
+          )}
         </View>
 
-        {/* Bullet points — single column, full width */}
-        {bullets.length > 0 && (
-          <View style={styles.bulletArea}>
-            {bullets.map((b, i) => (
-              <View key={i} style={styles.bulletRow}>
-                <Text style={styles.bulletDot}>{"•"}</Text>
-                <Text style={styles.bulletText}>
-                  {truncate(b, BULLET_MAX_CHARS)}
-                </Text>
-              </View>
-            ))}
+        {/* Info area */}
+        <View style={styles.productInfoCol}>
+          {/* Top line: Name | SKU | Price */}
+          <View style={styles.topLine}>
+            <Text style={styles.productName}>
+              {truncate(product.name, 70)}
+            </Text>
+            <Text style={styles.productSku}>
+              {product.sku || ""}
+            </Text>
+            <Text style={styles.productPrice}>
+              {showMainPrice ? `$${product.price.toFixed(2)}` : ""}
+            </Text>
           </View>
-        )}
+
+          {/* Bullet points — single column, full width */}
+          {bullets.length > 0 && (
+            <View style={styles.bulletArea}>
+              {bullets.map((b, i) => (
+                <View key={i} style={styles.bulletRow}>
+                  <Text style={styles.bulletDot}>{"•"}</Text>
+                  <Text style={styles.bulletText}>
+                    {truncate(b, BULLET_MAX_CHARS)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       </View>
+
+      {/* Variant rows */}
+      {showVariants && (
+        <View style={{ borderBottomWidth: 0.5, borderBottomColor: "#e5e7eb", marginBottom: ROW_GAP }}>
+          {variants.map((v) => (
+            <View key={v.id} style={styles.variantRow}>
+              <Text style={styles.variantName}>{truncate(v.name, 60)}</Text>
+              <Text style={styles.variantSku}>{v.sku || ""}</Text>
+              <Text style={styles.variantPrice}>${v.price.toFixed(2)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -571,6 +729,56 @@ function HeaderBlock({ header }: { header: HeaderItem }) {
   return (
     <View wrap={false}>
       <Text style={headerStyle}>{header.text}</Text>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Markdown text block
+// ---------------------------------------------------------------------------
+type MdBlock =
+  | { kind: "paragraph"; text: string }
+  | { kind: "bullet"; text: string };
+
+function parseTextBlocks(content: string): MdBlock[] {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line): MdBlock => {
+      if (/^[-•*]\s+/.test(line)) {
+        return {
+          kind: "bullet",
+          text: line
+            .replace(/^[-•*]\s+/, "")
+            .replace(/\*\*(.+?)\*\*/g, "$1")
+            .replace(/\*(.+?)\*/g, "$1"),
+        };
+      }
+      return {
+        kind: "paragraph",
+        text: line
+          .replace(/\*\*(.+?)\*\*/g, "$1")
+          .replace(/\*(.+?)\*/g, "$1"),
+      };
+    });
+}
+
+function TextBlock({ item }: { item: MarkdownTextItem }) {
+  if (!item.content.trim()) return null;
+  const blocks = parseTextBlocks(item.content);
+  return (
+    <View style={styles.textBlock} wrap={false}>
+      {blocks.map((block, i) =>
+        block.kind === "bullet" ? (
+          <View key={i} style={styles.textBulletRow}>
+            <Text style={styles.textBulletDot}>{"•"}</Text>
+            <Text style={styles.textBulletText}>{block.text}</Text>
+          </View>
+        ) : (
+          <Text key={i} style={styles.textParagraph}>{block.text}</Text>
+        )
+      )}
     </View>
   );
 }
@@ -632,17 +840,24 @@ export default function BookPdfDocument({
                 buildPairs(section.items).map((row) =>
                   row.kind === "header" ? (
                     <HeaderBlock key={row.key} header={row.item} />
-                  ) : (
-                    <View key={row.key} style={styles.twoColPair} wrap={false}>
-                      <ProductCell2Col product={row.left} />
-                      <View style={styles.twoColSpacer} />
-                      {row.right ? (
-                        <ProductCell2Col product={row.right} />
-                      ) : (
-                        <View style={{ width: COL_WIDTH }} />
-                      )}
-                    </View>
-                  )
+                  ) : row.kind === "text" ? (
+                    <TextBlock key={row.key} item={row.item} />
+                  ) : (() => {
+                    const hasVariants =
+                      ((row.left.variants?.length ?? 0) > 0 && (row.left.show_variants ?? true)) ||
+                      (row.right && (row.right.variants?.length ?? 0) > 0 && (row.right.show_variants ?? true));
+                    return (
+                      <View key={row.key} style={hasVariants ? { ...styles.twoColPair, height: undefined, minHeight: ROW_HEIGHT } : styles.twoColPair} wrap={false}>
+                        <ProductCell2Col product={row.left} />
+                        <View style={styles.twoColSpacer} />
+                        {row.right ? (
+                          <ProductCell2Col product={row.right} />
+                        ) : (
+                          <View style={{ width: COL_WIDTH }} />
+                        )}
+                      </View>
+                    );
+                  })()
                 )
               ) : (
                 section.items.map((item, idx) =>
@@ -650,6 +865,11 @@ export default function BookPdfDocument({
                     <HeaderBlock
                       key={`${section.id}-hdr-${idx}`}
                       header={item}
+                    />
+                  ) : item.type === "text" ? (
+                    <TextBlock
+                      key={`${section.id}-txt-${item.id}`}
+                      item={item}
                     />
                   ) : (
                     <ProductRow

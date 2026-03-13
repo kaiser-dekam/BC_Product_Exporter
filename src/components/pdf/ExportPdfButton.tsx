@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import Button from "@/components/ui/Button";
 import type { SectionItem } from "@/app/(dashboard)/books/[bookId]/page";
 
@@ -25,7 +25,21 @@ export default function ExportPdfButton({
   const [loading, setLoading] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const previewUrlRef = useRef<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
 
   const generateBlob = useCallback(async () => {
     const { pdf } = await import("@react-pdf/renderer");
@@ -42,6 +56,7 @@ export default function ExportPdfButton({
 
   // ---- Preview in modal ----
   const handlePreview = useCallback(async () => {
+    setOpen(false);
     setPreviewing(true);
     try {
       const blob = await generateBlob();
@@ -77,6 +92,7 @@ export default function ExportPdfButton({
 
   // ---- Direct export (download) ----
   const handleExport = useCallback(async () => {
+    setOpen(false);
     setLoading(true);
     try {
       const blob = await generateBlob();
@@ -103,52 +119,56 @@ export default function ExportPdfButton({
   );
 
   const disabled = sections.length === 0 || totalProducts === 0;
+  const busy = loading || (previewing && !previewUrl);
 
   return (
     <>
-      {/* Preview button */}
-      <Button
-        onClick={handlePreview}
-        loading={previewing && !previewUrl}
-        size="sm"
-        variant="ghost"
-        disabled={disabled}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-          />
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-          />
-        </svg>
-        {previewing && !previewUrl ? "Generating..." : "Preview"}
-      </Button>
+      {/* Export dropdown */}
+      <div ref={dropdownRef} className="relative">
+        <Button
+          onClick={() => setOpen((v) => !v)}
+          loading={busy}
+          size="sm"
+          variant="secondary"
+          disabled={disabled}
+        >
+          {loading ? "Generating PDF..." : previewing && !previewUrl ? "Generating..." : "Export"}
+          {!busy && (
+            <svg
+              className={`w-3 h-3 ml-1 transition-transform ${open ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          )}
+        </Button>
 
-      {/* Export / download button */}
-      <Button
-        onClick={handleExport}
-        loading={loading}
-        size="sm"
-        variant="secondary"
-        disabled={disabled}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          />
-        </svg>
-        {loading ? "Generating PDF..." : "Export PDF"}
-      </Button>
+        {open && !busy && (
+          <div className="absolute right-0 top-full mt-1 w-40 bg-card border border-border rounded-lg shadow-xl z-30 py-1">
+            <button
+              onClick={handlePreview}
+              className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors flex items-center gap-2"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Preview
+            </button>
+            <button
+              onClick={handleExport}
+              className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-white/10 transition-colors flex items-center gap-2"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export PDF
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Fullscreen preview modal */}
       {previewUrl && (

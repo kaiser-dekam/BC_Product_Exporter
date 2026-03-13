@@ -1,6 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+/**
+ * Returns the book if uid is the owner OR if the owner has added the user's
+ * email as a collaborator. Returns null if not found / no access.
+ */
+async function getAccessibleBook(
+  supabase: SupabaseClient,
+  bookId: string,
+  uid: string,
+  email: string | undefined
+) {
+  const { data: book } = await supabase
+    .from("books")
+    .select("*")
+    .eq("id", bookId)
+    .single();
+
+  if (!book) return null;
+  if (book.user_id === uid) return book;
+
+  if (email) {
+    const { data: ownerProfile } = await supabase
+      .from("profiles")
+      .select("collaborator_emails")
+      .eq("id", book.user_id)
+      .single();
+
+    if (
+      Array.isArray(ownerProfile?.collaborator_emails) &&
+      ownerProfile.collaborator_emails.includes(email)
+    ) {
+      return book;
+    }
+  }
+
+  return null;
+}
 
 export async function GET(
   req: NextRequest,
@@ -10,22 +48,20 @@ export async function GET(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  const uid = auth.user.uid;
-
   try {
     const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from("books")
-      .select("*")
-      .eq("id", bookId)
-      .eq("user_id", uid)
-      .single();
+    const book = await getAccessibleBook(
+      supabase,
+      bookId,
+      auth.user.uid,
+      auth.user.email
+    );
 
-    if (error || !data) {
+    if (!book) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(book);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch book";
@@ -41,20 +77,17 @@ export async function PUT(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  const uid = auth.user.uid;
-
   try {
     const supabase = createAdminClient();
 
-    // Verify ownership
-    const { data: existing, error: fetchError } = await supabase
-      .from("books")
-      .select("id")
-      .eq("id", bookId)
-      .eq("user_id", uid)
-      .single();
+    const existing = await getAccessibleBook(
+      supabase,
+      bookId,
+      auth.user.uid,
+      auth.user.email
+    );
 
-    if (fetchError || !existing) {
+    if (!existing) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
@@ -94,8 +127,7 @@ export async function PUT(
     const { error: updateError } = await supabase
       .from("books")
       .update(updateData)
-      .eq("id", bookId)
-      .eq("user_id", uid);
+      .eq("id", bookId);
 
     if (updateError) throw updateError;
 
@@ -119,6 +151,7 @@ export async function DELETE(
 
   try {
     const supabase = createAdminClient();
+    // Only the owner can delete
     const { error } = await supabase
       .from("books")
       .delete()

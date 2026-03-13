@@ -68,6 +68,12 @@ export default function SettingsPage() {
   const [systemPromptLoading, setSystemPromptLoading] = useState(false);
   const [systemPromptMessage, setSystemPromptMessage] = useState<string | null>(null);
 
+  // Collaborators
+  const [collaboratorEmails, setCollaboratorEmails] = useState<string[]>([]);
+  const [newCollaboratorEmail, setNewCollaboratorEmail] = useState("");
+  const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
+  const [collaboratorsMessage, setCollaboratorsMessage] = useState<string | null>(null);
+
   // Admin settings
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-20250514");
   const [adminSettingsLoading, setAdminSettingsLoading] = useState(false);
@@ -93,6 +99,7 @@ export default function SettingsPage() {
         setHasSavedCreds(!!data.has_bigcommerce_credentials);
         setHasSavedAnthropicKey(!!data.has_anthropic_key);
         setSystemPrompt(data.claude_system_prompt || "");
+        setCollaboratorEmails(data.collaborator_emails || []);
       } catch {
         // Silently fail on load - user can still fill in fields
       } finally {
@@ -326,6 +333,48 @@ export default function SettingsPage() {
     setSystemPromptMessage("Cleared. Save to apply the default prompt.");
     autoClear(setSystemPromptMessage);
   }, [autoClear]);
+
+  // Handler: Add collaborator email
+  const handleAddCollaborator = useCallback(() => {
+    const email = newCollaboratorEmail.trim().toLowerCase();
+    if (!email || collaboratorEmails.includes(email)) return;
+    setCollaboratorEmails((prev) => [...prev, email]);
+    setNewCollaboratorEmail("");
+  }, [newCollaboratorEmail, collaboratorEmails]);
+
+  // Handler: Remove collaborator email
+  const handleRemoveCollaborator = useCallback((email: string) => {
+    setCollaboratorEmails((prev) => prev.filter((e) => e !== email));
+  }, []);
+
+  // Handler: Save collaborators
+  const handleCollaboratorsSave = useCallback(async () => {
+    setCollaboratorsLoading(true);
+    setCollaboratorsMessage(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ collaborator_emails: collaboratorEmails }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save collaborators");
+      }
+      setCollaboratorsMessage("Collaborators saved.");
+      autoClear(setCollaboratorsMessage);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setCollaboratorsMessage(`Error: ${msg}`);
+      autoClear(setCollaboratorsMessage);
+    } finally {
+      setCollaboratorsLoading(false);
+    }
+  }, [getIdToken, collaboratorEmails, autoClear]);
 
   // Handler: Save Admin Settings
   const handleAdminSettingsSave = useCallback(async () => {
@@ -662,7 +711,78 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          {/* Section 5: Admin Settings (only visible to admins) */}
+          {/* Section 5: Collaborators */}
+          <Card>
+            <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
+              Collaborators
+            </h3>
+            <p className="text-xs text-muted mb-4">
+              Add email addresses of other users who can view and edit your Sales
+              Books. They must have an account with that email to access your
+              books.
+            </p>
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Input
+                    placeholder="colleague@example.com"
+                    value={newCollaboratorEmail}
+                    onChange={(e) => setNewCollaboratorEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleAddCollaborator()}
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleAddCollaborator}
+                  disabled={!newCollaboratorEmail.trim()}
+                >
+                  Add
+                </Button>
+              </div>
+              {collaboratorEmails.length > 0 && (
+                <ul className="space-y-2">
+                  {collaboratorEmails.map((email) => (
+                    <li
+                      key={email}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                    >
+                      <span>{email}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCollaborator(email)}
+                        className="text-muted hover:text-danger transition-colors text-xs"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={handleCollaboratorsSave}
+                  loading={collaboratorsLoading}
+                  size="sm"
+                >
+                  Save Collaborators
+                </Button>
+                {collaboratorsMessage && (
+                  <span
+                    className={`text-sm ${
+                      collaboratorsMessage.startsWith("Error")
+                        ? "text-danger"
+                        : "text-success"
+                    }`}
+                  >
+                    {collaboratorsMessage}
+                  </span>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          {/* Section 6: Admin Settings (only visible to admins) */}
           {isAdmin && (
             <Card>
               <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">

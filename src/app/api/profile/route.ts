@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { full_name, store_name, claude_system_prompt } = body;
+  const { full_name, store_name, claude_system_prompt, collaborator_emails } = body;
 
   const supabase = createAdminClient();
 
@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
     if (store_name !== undefined) updates.store_name = store_name;
     if (claude_system_prompt !== undefined)
       updates.claude_system_prompt = claude_system_prompt;
+    if (collaborator_emails !== undefined)
+      updates.collaborator_emails = collaborator_emails;
 
     await supabase.from("profiles").update(updates).eq("id", decoded.uid);
   } else {
@@ -63,7 +65,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, email, full_name, store_name, role, bigcommerce_credentials, anthropic_api_key_encrypted, claude_system_prompt, csv_preferences"
+      "id, email, full_name, store_name, role, bigcommerce_credentials, anthropic_api_key_encrypted, claude_system_prompt, csv_preferences, collaborator_emails"
     )
     .eq("id", decoded.uid)
     .single();
@@ -83,5 +85,6 @@ export async function GET(req: NextRequest) {
     has_anthropic_key: !!data.anthropic_api_key_encrypted,
     claude_system_prompt: data.claude_system_prompt || null,
     csv_preferences: data.csv_preferences,
+    collaborator_emails: (data.collaborator_emails as string[]) || [],
   });
 }
