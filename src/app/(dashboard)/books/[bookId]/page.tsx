@@ -42,14 +42,18 @@ export interface ProductItem {
   name: string;
   sku: string;
   price: number;
+  sale_price?: number | null;
+  cost_price?: number | null;
   primary_image_url: string;
   claude_summary: string | null;
   user_description: string | null;       // user-written custom description
   description_source: "ai" | "custom";  // which to render in PDF
   is_custom?: boolean;                   // true for manually created products
   variants?: ProductVariant[];
-  show_main_price?: boolean;             // default true — hide product-level price in PDF
-  show_variants?: boolean;               // default true — hide variant rows in PDF
+  show_price?: boolean;                  // default true  — show regular price in PDF
+  show_sale_price?: boolean;             // default false — show sale price in PDF
+  show_cost_price?: boolean;             // default false — show cost price in PDF
+  show_variants?: boolean;               // default true  — show variant rows in PDF
 }
 
 export interface HeaderItem {
@@ -115,7 +119,10 @@ function migrateSections(
               user_description: item.user_description ?? null,
               description_source: item.description_source ?? "ai",
               variants: item.variants ?? [],
-              show_main_price: item.show_main_price ?? true,
+              // Migrate old show_main_price → show_price
+              show_price: item.show_price ?? item.show_main_price ?? true,
+              show_sale_price: item.show_sale_price ?? false,
+              show_cost_price: item.show_cost_price ?? false,
               show_variants: item.show_variants ?? true,
             };
           }
@@ -153,7 +160,21 @@ export default function BookEditorPage({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSectionId, setPickerSectionId] = useState<string | null>(null);
+  const [pickerInsertAfterId, setPickerInsertAfterId] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
+  // Book price display preferences (loaded from user profile)
+  const [bookPrefs, setBookPrefs] = useState<{
+    show_price: boolean;
+    show_sale_price: boolean;
+    show_cost_price: boolean;
+    show_variants: boolean;
+  }>({
+    show_price: true,
+    show_sale_price: false,
+    show_cost_price: false,
+    show_variants: true,
+  });
 
   // Version snapshots
   const [versions, setVersions] = useState<Array<{ id: string; label: string; created_at: string }>>([]);
@@ -197,6 +218,33 @@ export default function BookEditorPage({
   useEffect(() => {
     fetchBook();
   }, [fetchBook]);
+
+  // Load user's book preferences (price display defaults)
+  useEffect(() => {
+    async function loadPrefs() {
+      try {
+        const token = await getIdToken();
+        if (!token) return;
+        const res = await fetch("/api/profile", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.book_preferences) {
+          const bp = data.book_preferences;
+          setBookPrefs({
+            show_price: bp.show_price ?? bp.show_main_price ?? true,
+            show_sale_price: bp.show_sale_price ?? false,
+            show_cost_price: bp.show_cost_price ?? false,
+            show_variants: bp.show_variants ?? true,
+          });
+        }
+      } catch {
+        // Use defaults silently
+      }
+    }
+    loadPrefs();
+  }, [getIdToken]);
 
   // -----------------------------------------------------------------------
   // Save book
@@ -643,7 +691,7 @@ export default function BookEditorPage({
   );
 
   const updateProductOptions = useCallback(
-    (sectionId: string, productId: string, options: { show_main_price?: boolean; show_variants?: boolean }) => {
+    (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean }) => {
       if (!book) return;
       const updated = {
         ...book,
@@ -687,39 +735,56 @@ export default function BookEditorPage({
   // -----------------------------------------------------------------------
   // Product picker
   // -----------------------------------------------------------------------
-  const openProductPicker = useCallback((sectionId: string) => {
+  const openProductPicker = useCallback((sectionId: string, afterItemId?: string) => {
     setPickerSectionId(sectionId);
+    setPickerInsertAfterId(afterItemId ?? null);
     setPickerOpen(true);
   }, []);
 
   const handleAddProducts = useCallback(
-    (products: Array<{ id: string; name: string; sku: string; price: number; primary_image_url: string; claude_summary: string | null; user_description?: string | null; description_source?: "ai" | "custom"; is_custom?: boolean }>) => {
+    (products: Array<{ id: string; name: string; sku: string; price: number; sale_price?: number | null; cost_price?: number | null; primary_image_url: string; claude_summary: string | null; variants?: ProductVariant[]; user_description?: string | null; description_source?: "ai" | "custom"; is_custom?: boolean }>) => {
       if (!book || !pickerSectionId) return;
-      const newItems: ProductItem[] = products.map((p) => ({
-        type: "product" as const,
-        product_cache_id: p.id,
-        name: p.name,
-        sku: p.sku,
-        price: p.price,
-        primary_image_url: p.primary_image_url,
-        claude_summary: p.claude_summary,
-        user_description: p.user_description ?? null,
-        description_source: p.description_source ?? (p.claude_summary ? "ai" : "custom"),
-        is_custom: p.is_custom ?? false,
-      }));
+      const newItems: ProductItem[] = products.map((p) => {
+        const variants = p.variants ?? [];
+        return {
+          type: "product" as const,
+          product_cache_id: p.id,
+          name: p.name,
+          sku: p.sku,
+          price: p.price,
+          sale_price: p.sale_price ?? null,
+          cost_price: p.cost_price ?? null,
+          primary_image_url: p.primary_image_url,
+          claude_summary: p.claude_summary,
+          user_description: p.user_description ?? null,
+          description_source: p.description_source ?? (p.claude_summary ? "ai" : "custom"),
+          is_custom: p.is_custom ?? false,
+          variants,
+          show_price: bookPrefs.show_price,
+          show_sale_price: bookPrefs.show_sale_price,
+          show_cost_price: bookPrefs.show_cost_price,
+          show_variants: bookPrefs.show_variants,
+        };
+      });
 
       const updated = {
         ...book,
-        sections: book.sections.map((s) =>
-          s.id === pickerSectionId
-            ? { ...s, items: [...s.items, ...newItems] }
-            : s
-        ),
+        sections: book.sections.map((s) => {
+          if (s.id !== pickerSectionId) return s;
+          // Insert after a specific item (e.g. after a header) or append at end
+          if (pickerInsertAfterId) {
+            const idx = s.items.findIndex((i) => getItemId(i) === pickerInsertAfterId);
+            if (idx !== -1) {
+              return { ...s, items: [...s.items.slice(0, idx + 1), ...newItems, ...s.items.slice(idx + 1)] };
+            }
+          }
+          return { ...s, items: [...s.items, ...newItems] };
+        }),
       };
       setBook(updated);
       saveBook(updated);
     },
-    [book, pickerSectionId, saveBook]
+    [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs]
   );
 
   // Get existing product IDs in the current picker section
@@ -1053,6 +1118,7 @@ export default function BookEditorPage({
         onClose={() => {
           setPickerOpen(false);
           setPickerSectionId(null);
+          setPickerInsertAfterId(null);
         }}
         onAdd={handleAddProducts}
         existingProductIds={existingProductIds}

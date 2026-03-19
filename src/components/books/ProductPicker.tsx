@@ -5,15 +5,19 @@ import { useAuth } from "@/contexts/AuthContext";
 import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
+import type { ProductVariant } from "@/app/(dashboard)/books/[bookId]/page";
 
 interface PickerProduct {
   id: string;
   name: string;
   sku: string;
   price: number;
+  sale_price?: number | null;
+  cost_price?: number | null;
   primary_image_url: string;
   brand_name: string;
   claude_summary: string | null;
+  variants?: ProductVariant[];
   user_description?: string | null;
   description_source?: "ai" | "custom";
   is_custom?: boolean;

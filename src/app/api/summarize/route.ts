@@ -12,12 +12,30 @@ Example format:
 - Supports up to 500 lbs with reinforced corner brackets
 - Dimensions: 48" W x 24" D x 36" H, ships fully assembled`;
 
+/** Strip HTML tags and decode basic entities for a cleaner AI prompt. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function buildUserMessage(product: Record<string, unknown>): string {
+  const rawDesc = (product.description ?? "") as string;
+  const cleanDesc = rawDesc ? stripHtml(rawDesc) : "";
   return `Product: ${product.name ?? ""}
 SKU: ${product.sku ?? ""}
 Price: $${product.price ?? ""}
 Brand: ${product.brand_name ?? ""}
-Description: ${product.description ?? ""}
+Description: ${cleanDesc}
 Weight: ${product.weight ?? ""} lbs
 Dimensions: ${product.width ?? ""} x ${product.height ?? ""} x ${product.depth ?? ""} in`;
 }
@@ -136,7 +154,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: {
           "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
+          "anthropic-version": "2024-10-22",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -165,7 +183,8 @@ export async function POST(req: NextRequest) {
           claude_model_used: claudeModel,
           summarized_at: new Date().toISOString(),
         })
-        .eq("id", productId);
+        .eq("id", productId)
+        .eq("user_id", uid);
 
       if (updateError) {
         errors.push(`Failed to save summary for ${productId}: ${updateError.message}`);

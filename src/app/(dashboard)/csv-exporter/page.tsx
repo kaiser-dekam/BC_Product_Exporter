@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   DEFAULT_SELECTED_FIELDS,
@@ -81,6 +81,7 @@ export default function CsvExporterPage() {
   const [customDomain, setCustomDomain] = useState("");
 
   // Export state
+  const previewRef = useRef<HTMLDivElement>(null);
   const [csvContent, setCsvContent] = useState<string | null>(null);
   const [rowCount, setRowCount] = useState(0);
   const [columnCount, setColumnCount] = useState(0);
@@ -110,6 +111,8 @@ export default function CsvExporterPage() {
     setShowCredentialModal(false);
   }, []);
 
+  const VARIANT_FIELDS = ["variant_skus", "variant_prices", "variants"];
+
   const handleFieldToggle = useCallback(
     (field: string) => {
       setSelectedFields((prev) => {
@@ -118,6 +121,20 @@ export default function CsvExporterPage() {
           : [...prev, field];
         const newOrder = reconcileOrder(next);
         setFieldOrder(newOrder);
+
+        // Auto-enable "Include variants" when a variant field is selected
+        if (VARIANT_FIELDS.includes(field) && next.includes(field)) {
+          setFilters((prev) => ({ ...prev, includeVariants: true }));
+        }
+        // Auto-disable "Include variants" when all variant fields are deselected
+        if (
+          VARIANT_FIELDS.includes(field) &&
+          !next.includes(field) &&
+          !VARIANT_FIELDS.some((vf) => vf !== field && next.includes(vf))
+        ) {
+          setFilters((prev) => ({ ...prev, includeVariants: false }));
+        }
+
         return next;
       });
     },
@@ -131,8 +148,32 @@ export default function CsvExporterPage() {
   const handleFilterChange = useCallback(
     (key: keyof FilterValues, value: boolean) => {
       setFilters((prev) => ({ ...prev, [key]: value }));
+
+      // When "Include variants" is toggled, auto-add or remove variant fields
+      if (key === "includeVariants") {
+        if (value) {
+          // Add variant fields that aren't already selected
+          setSelectedFields((prev) => {
+            const toAdd = VARIANT_FIELDS.filter((f) => !prev.includes(f));
+            if (toAdd.length === 0) return prev;
+            const next = [...prev, ...toAdd];
+            const newOrder = reconcileOrder(next);
+            setFieldOrder(newOrder);
+            return next;
+          });
+        } else {
+          // Remove all variant fields
+          setSelectedFields((prev) => {
+            const next = prev.filter((f) => !VARIANT_FIELDS.includes(f));
+            if (next.length === prev.length) return prev;
+            const newOrder = reconcileOrder(next);
+            setFieldOrder(newOrder);
+            return next;
+          });
+        }
+      }
     },
-    []
+    [reconcileOrder]
   );
 
   const handleReset = useCallback(() => {
@@ -197,6 +238,9 @@ export default function CsvExporterPage() {
       setCsvContent(data.csv_content);
       setRowCount(data.row_count ?? 0);
       setColumnCount(data.column_count ?? 0);
+      setTimeout(() => {
+        previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "An unexpected error occurred";
@@ -406,10 +450,12 @@ export default function CsvExporterPage() {
             {selectedFields.length} of {Object.keys(FIELD_OPTIONS).length}{" "}
             fields selected
           </p>
-          <FieldLibrary
-            selectedFields={selectedFields}
-            onToggle={handleFieldToggle}
-          />
+          <div className="max-h-[300px] overflow-y-auto">
+            <FieldLibrary
+              selectedFields={selectedFields}
+              onToggle={handleFieldToggle}
+            />
+          </div>
         </Card>
 
         {/* Right: Order + Filters + Actions */}
@@ -482,7 +528,7 @@ export default function CsvExporterPage() {
 
       {/* CSV Preview */}
       {csvContent && !loading && (
-        <div className="space-y-4">
+        <div ref={previewRef} className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Export Preview</h2>
             <Button onClick={handleDownload} loading={loading}>

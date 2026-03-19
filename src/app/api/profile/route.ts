@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { full_name, store_name, claude_system_prompt, collaborator_emails } = body;
+  const { full_name, store_name, claude_system_prompt, collaborator_emails, book_preferences } = body;
 
   const supabase = createAdminClient();
 
@@ -34,6 +34,8 @@ export async function POST(req: NextRequest) {
       updates.claude_system_prompt = claude_system_prompt;
     if (collaborator_emails !== undefined)
       updates.collaborator_emails = collaborator_emails;
+    if (book_preferences !== undefined)
+      updates.book_preferences = book_preferences;
 
     await supabase.from("profiles").update(updates).eq("id", decoded.uid);
   } else {
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, email, full_name, store_name, role, bigcommerce_credentials, anthropic_api_key_encrypted, claude_system_prompt, csv_preferences, collaborator_emails"
+      "id, email, full_name, store_name, role, bigcommerce_credentials, anthropic_api_key_encrypted, claude_system_prompt, csv_preferences, collaborator_emails, book_preferences"
     )
     .eq("id", decoded.uid)
     .single();
@@ -86,5 +88,6 @@ export async function GET(req: NextRequest) {
     claude_system_prompt: data.claude_system_prompt || null,
     csv_preferences: data.csv_preferences,
     collaborator_emails: (data.collaborator_emails as string[]) || [],
+    book_preferences: (data.book_preferences as { show_price: boolean; show_sale_price: boolean; show_cost_price: boolean; show_variants: boolean } | null) ?? { show_price: true, show_sale_price: false, show_cost_price: false, show_variants: true },
   });
 }

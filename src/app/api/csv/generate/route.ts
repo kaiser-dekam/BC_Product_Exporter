@@ -52,9 +52,14 @@ export async function POST(req: NextRequest) {
   const resolved = await resolveCredentials(auth.user.uid, credentials);
   if (resolved.error) return resolved.error;
 
+  // Auto-detect: if any variant-related fields are requested, fetch variants
+  const VARIANT_FIELDS = ["variant_skus", "variant_prices", "variants"];
+  const needsVariants =
+    include_variants || fields.some((f) => VARIANT_FIELDS.includes(f));
+
   try {
     const products = await fetchProducts(resolved.config, {
-      includeVariants: include_variants,
+      includeVariants: needsVariants,
     });
 
     const filtered = filterProducts(products, {

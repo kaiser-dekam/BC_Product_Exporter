@@ -46,8 +46,8 @@ const PRICE_COL = 55;
 const NAME_COL = INFO_WIDTH - SKU_COL - PRICE_COL; // ~397 pt
 
 // Bullet font
-const BULLET_FONT = 5.5;
-const BULLET_LINE_HEIGHT = 6; // pt absolute
+const BULLET_FONT = 6.5;
+const BULLET_LINE_HEIGHT = 6.5; // pt absolute
 
 // Max characters per bullet (matches AI prompt constraint of 90 chars)
 const BULLET_MAX_CHARS = 90;
@@ -131,13 +131,17 @@ const styles = StyleSheet.create({
     color: "#1a1a1a",
     marginTop: 4,
     marginBottom: 2,
+    backgroundColor: "#00bf00",
+    padding: 3,
   },
   headerH3: {
     fontSize: 8.5,
     fontWeight: "bold",
-    color: "#1a1a1a",
+    color: "#ffffff",
     marginTop: 3,
     marginBottom: 1,
+    backgroundColor: "#151515",
+    padding: 3,
   },
 
   // Column header row (repeats each page) -----------------------------------
@@ -430,6 +434,8 @@ interface ProductItem {
   name: string;
   sku: string;
   price: number;
+  sale_price?: number | null;
+  cost_price?: number | null;
   primary_image_url: string;
   claude_summary: string | null;
   user_description?: string | null;
@@ -439,7 +445,9 @@ interface ProductItem {
   height?: number;
   depth?: number;
   variants?: ProductVariant[];
-  show_main_price?: boolean;
+  show_price?: boolean;
+  show_sale_price?: boolean;
+  show_cost_price?: boolean;
   show_variants?: boolean;
 }
 
@@ -559,6 +567,17 @@ function buildPairs(items: SectionItem[]): Pair[] {
 }
 
 // ---------------------------------------------------------------------------
+// Build price lines from product's enabled price fields
+// ---------------------------------------------------------------------------
+function buildPriceLines(product: ProductItem): Array<{ label: string; value: number }> {
+  const lines: Array<{ label: string; value: number }> = [];
+  if (product.show_price ?? true) lines.push({ label: "", value: product.price });
+  if ((product.show_sale_price ?? false) && product.sale_price != null) lines.push({ label: "Sale", value: product.sale_price });
+  if ((product.show_cost_price ?? false) && product.cost_price != null) lines.push({ label: "Cost", value: product.cost_price });
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Product cell for 2-col layout
 // ---------------------------------------------------------------------------
 function ProductCell2Col({ product }: { product: ProductItem }) {
@@ -567,7 +586,6 @@ function ProductCell2Col({ product }: { product: ProductItem }) {
       ? product.user_description
       : null;
   const customBullets = customDesc ? parseBullets(customDesc) : [];
-  // Fall back to AI summary if the custom description produces no parseable bullets
   const bullets =
     customBullets.length > 0
       ? customBullets
@@ -576,8 +594,8 @@ function ProductCell2Col({ product }: { product: ProductItem }) {
       : [];
 
   const variants = product.variants ?? [];
-  const showMainPrice = product.show_main_price ?? true;
   const showVariants = (product.show_variants ?? true) && variants.length > 0;
+  const priceLines = buildPriceLines(product);
 
   return (
     <View style={{ width: COL_WIDTH }}>
@@ -598,16 +616,27 @@ function ProductCell2Col({ product }: { product: ProductItem }) {
           <View style={styles.topLine}>
             <Text style={styles.productName2col}>{truncate(product.name, 40)}</Text>
             <Text style={styles.productSku2col}>{product.sku || ""}</Text>
-            <Text style={styles.productPrice2col}>
-              {showMainPrice ? `$${product.price.toFixed(2)}` : ""}
-            </Text>
+            {priceLines.length <= 1 ? (
+              <Text style={styles.productPrice2col}>
+                {priceLines.length === 1 ? `$${priceLines[0].value.toFixed(2)}` : ""}
+              </Text>
+            ) : (
+              <View style={{ width: PRICE_COL_2COL }}>
+                {priceLines.map((pl, i) => (
+                  <View key={i} style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                    {pl.label ? <Text style={{ fontSize: 4.5, color: "#6b7280", marginRight: 1 }}>{pl.label}</Text> : null}
+                    <Text style={{ fontSize: 6, fontWeight: "bold", color: "#1a1a1a" }}>{`$${pl.value.toFixed(2)}`}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {bullets.length > 0 && (
             <View style={styles.bulletArea}>
               {bullets.map((b, i) => (
                 <View key={i} style={styles.bulletRow}>
-                  <Text style={styles.bulletDot}>{"•"}</Text>
+                  <Text style={styles.bulletDot}>{"\u2022"}</Text>
                   <Text style={styles.bulletText}>{truncate(b, BULLET_MAX_CHARS_2COL)}</Text>
                 </View>
               ))}
@@ -650,8 +679,8 @@ function ProductRow({ product }: { product: ProductItem }) {
       : [];
 
   const variants = product.variants ?? [];
-  const showMainPrice = product.show_main_price ?? true;
   const showVariants = (product.show_variants ?? true) && variants.length > 0;
+  const priceLines = buildPriceLines(product);
 
   return (
     <View wrap={false}>
@@ -677,9 +706,20 @@ function ProductRow({ product }: { product: ProductItem }) {
             <Text style={styles.productSku}>
               {product.sku || ""}
             </Text>
-            <Text style={styles.productPrice}>
-              {showMainPrice ? `$${product.price.toFixed(2)}` : ""}
-            </Text>
+            {priceLines.length <= 1 ? (
+              <Text style={styles.productPrice}>
+                {priceLines.length === 1 ? `$${priceLines[0].value.toFixed(2)}` : ""}
+              </Text>
+            ) : (
+              <View style={{ width: PRICE_COL }}>
+                {priceLines.map((pl, i) => (
+                  <View key={i} style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                    {pl.label ? <Text style={{ fontSize: 5.5, color: "#6b7280", marginRight: 1 }}>{pl.label}</Text> : null}
+                    <Text style={{ fontSize: 8.5, fontWeight: "bold", color: "#1a1a1a" }}>{`$${pl.value.toFixed(2)}`}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* Bullet points — single column, full width */}

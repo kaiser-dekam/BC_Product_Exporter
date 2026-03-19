@@ -8,7 +8,7 @@ const LIST_FIELDS =
 
 // Minimal fields for ProductPicker modal
 const PICKER_FIELDS =
-  "id, user_id, name, sku, price, primary_image_url, brand_name, claude_summary";
+  "id, user_id, name, sku, price, sale_price, cost_price, primary_image_url, brand_name, claude_summary, variants";
 
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   DndContext,
   closestCenter,
@@ -43,7 +43,7 @@ interface SectionEditorProps {
   onRemoveItem: (sectionId: string, itemId: string) => void;
   onRemoveSection: (sectionId: string) => void;
   onRenameSection: (sectionId: string, newTitle: string) => void;
-  onAddProducts: (sectionId: string) => void;
+  onAddProducts: (sectionId: string, afterItemId?: string) => void;
   onSaveSection?: (sectionId: string, finalTitle: string) => void;
   onAddHeader: (sectionId: string, level: 1 | 2 | 3) => void;
   onUpdateHeader: (sectionId: string, headerId: string, text: string, level: 1 | 2 | 3) => void;
@@ -52,8 +52,22 @@ interface SectionEditorProps {
   onReorderItems: (sectionId: string, items: SectionItem[]) => void;
   onUpdateProductDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
   onUpdateProductVariants: (sectionId: string, productId: string, variants: ProductVariant[]) => void;
-  onUpdateProductOptions: (sectionId: string, productId: string, options: { show_main_price?: boolean; show_variants?: boolean }) => void;
+  onUpdateProductOptions: (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean }) => void;
   onUpdateLayout: (sectionId: string, layout: "1-col" | "2-col") => void;
+}
+
+// ---------------------------------------------------------------------------
+// Count children nested under a header (for collapse badge)
+// ---------------------------------------------------------------------------
+function countHeaderChildren(items: SectionItem[], headerIndex: number): number {
+  const header = items[headerIndex] as HeaderItem;
+  let count = 0;
+  for (let i = headerIndex + 1; i < items.length; i++) {
+    const item = items[i];
+    if (item.type === "header" && item.level <= header.level) break;
+    count++;
+  }
+  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +86,7 @@ function SortableProductRow({
   onRemove: (sectionId: string, itemId: string) => void;
   onUpdateDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
   onUpdateVariants: (sectionId: string, productId: string, variants: ProductVariant[]) => void;
-  onUpdateOptions: (sectionId: string, productId: string, options: { show_main_price?: boolean; show_variants?: boolean }) => void;
+  onUpdateOptions: (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean }) => void;
 }) {
   const {
     attributes,
@@ -113,7 +127,9 @@ function SortableProductRow({
   const activeSource = product.description_source ?? (product.claude_summary ? "ai" : "custom");
   const hasCustom = !!product.user_description;
   const variants = product.variants ?? [];
-  const showMainPrice = product.show_main_price ?? true;
+  const showPrice = product.show_price ?? true;
+  const showSalePrice = product.show_sale_price ?? false;
+  const showCostPrice = product.show_cost_price ?? false;
   const showVariants = product.show_variants ?? true;
 
   const addVariant = () => {
@@ -135,6 +151,48 @@ function SortableProductRow({
   const removeVariant = (variantId: string) => {
     onUpdateVariants(sectionId, product.product_cache_id, variants.filter((v) => v.id !== variantId));
   };
+
+  // Price display checkboxes shared between desc editor and variants editor
+  const priceCheckboxes = (
+    <div className="flex items-center gap-4 flex-wrap">
+      <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showPrice}
+          onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_price: e.target.checked })}
+          className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+        />
+        Regular price
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showSalePrice}
+          onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_sale_price: e.target.checked })}
+          className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+        />
+        Sale price
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showCostPrice}
+          onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_cost_price: e.target.checked })}
+          className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+        />
+        Cost price
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showVariants}
+          onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_variants: e.target.checked })}
+          className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+        />
+        Variants
+      </label>
+    </div>
+  );
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -276,6 +334,12 @@ function SortableProductRow({
             </div>
           )}
 
+          {/* Price display options */}
+          <div className="mt-3 pt-3 border-t border-border/50">
+            <p className="text-xs font-medium text-muted mb-2">Price Display</p>
+            {priceCheckboxes}
+          </div>
+
           <div className="flex items-center justify-end gap-2 mt-3">
             <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)}>Cancel</Button>
             <Button size="sm" onClick={saveDesc}>Save</Button>
@@ -288,26 +352,11 @@ function SortableProductRow({
         <div className="mt-1 mb-2 rounded-lg border border-border bg-surface/50 p-3">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-text">Variants</span>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showMainPrice}
-                  onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_main_price: e.target.checked })}
-                  className="rounded border-border text-accent focus:ring-accent w-3 h-3"
-                />
-                Show main price
-              </label>
-              <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showVariants}
-                  onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_variants: e.target.checked })}
-                  className="rounded border-border text-accent focus:ring-accent w-3 h-3"
-                />
-                Show variants
-              </label>
-            </div>
+          </div>
+
+          {/* Price display options */}
+          <div className="mb-3 pb-3 border-b border-border/50">
+            {priceCheckboxes}
           </div>
 
           {/* Existing variants */}
@@ -367,18 +416,26 @@ function SortableProductRow({
 }
 
 // ---------------------------------------------------------------------------
-// Sortable header row
+// Sortable header row — with collapse toggle + add product button
 // ---------------------------------------------------------------------------
 function SortableHeaderRow({
   header,
   sectionId,
+  childCount,
+  isCollapsed,
   onRemove,
   onUpdate,
+  onToggleCollapse,
+  onAddProducts,
 }: {
   header: HeaderItem;
   sectionId: string;
+  childCount: number;
+  isCollapsed: boolean;
   onRemove: (sectionId: string, itemId: string) => void;
   onUpdate: (sectionId: string, headerId: string, text: string, level: 1 | 2 | 3) => void;
+  onToggleCollapse: (headerId: string) => void;
+  onAddProducts: (sectionId: string, afterItemId?: string) => void;
 }) {
   const {
     attributes,
@@ -420,6 +477,24 @@ function SortableHeaderRow({
         </svg>
       </button>
 
+      {/* Collapse toggle */}
+      {childCount > 0 && (
+        <button
+          onClick={() => onToggleCollapse(header.id)}
+          className="text-muted hover:text-text transition-colors p-0.5 flex-shrink-0"
+          title={isCollapsed ? `Expand (${childCount} hidden)` : "Collapse"}
+        >
+          <svg
+            className={`w-3.5 h-3.5 transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      )}
+
       {/* Level selector */}
       <select
         value={header.level}
@@ -442,10 +517,28 @@ function SortableHeaderRow({
         placeholder={`Heading ${header.level} text...`}
       />
 
+      {/* Collapsed count */}
+      {isCollapsed && childCount > 0 && (
+        <span className="text-[10px] text-muted flex-shrink-0">
+          {childCount} item{childCount !== 1 ? "s" : ""} hidden
+        </span>
+      )}
+
       {/* Type badge */}
       <Badge variant="info" className="flex-shrink-0">
         H{header.level}
       </Badge>
+
+      {/* Add product after this header */}
+      <button
+        onClick={() => onAddProducts(sectionId, header.id)}
+        className="text-muted hover:text-accent transition-colors p-1 flex-shrink-0"
+        title="Add product after this header"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+      </button>
 
       {/* Remove button */}
       <button
@@ -509,7 +602,7 @@ function SortableTextRow({
         </button>
         <Badge variant="default" className="flex-shrink-0 text-[10px]">Text</Badge>
         <span className="flex-1 text-xs text-muted truncate">
-          {item.content ? item.content.slice(0, 60) + (item.content.length > 60 ? "…" : "") : "Empty text block"}
+          {item.content ? item.content.slice(0, 60) + (item.content.length > 60 ? "\u2026" : "") : "Empty text block"}
         </span>
         <button
           onClick={() => onRemove(sectionId, item.id)}
@@ -528,7 +621,7 @@ function SortableTextRow({
           onChange={(e) => onUpdate(sectionId, item.id, e.target.value)}
           className="w-full text-xs bg-transparent border-none focus:outline-none resize-none text-text leading-relaxed placeholder:text-muted/50"
           rows={4}
-          placeholder={"Enter markdown text…\nUse **bold**, *italic*, or - bullet points"}
+          placeholder={"Enter markdown text\u2026\nUse **bold**, *italic*, or - bullet points"}
         />
       </div>
     </div>
@@ -545,7 +638,7 @@ function AddItemDropdown({
   onAddHeader,
 }: {
   sectionId: string;
-  onAddProducts: (sectionId: string) => void;
+  onAddProducts: (sectionId: string, afterItemId?: string) => void;
   onAddText: (sectionId: string) => void;
   onAddHeader: (sectionId: string, level: 1 | 2 | 3) => void;
 }) {
@@ -652,10 +745,55 @@ export default function SectionEditor({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  // ---------------------------------------------------------------------------
+  // Header collapse state (local to this section)
+  // ---------------------------------------------------------------------------
+  const [collapsedHeaders, setCollapsedHeaders] = useState<Set<string>>(new Set());
+
+  const toggleHeaderCollapse = (headerId: string) => {
+    setCollapsedHeaders((prev) => {
+      const next = new Set(prev);
+      if (next.has(headerId)) next.delete(headerId);
+      else next.add(headerId);
+      return next;
+    });
+  };
+
+  // Compute which items are visible based on collapsed headers
+  const visibleItems = useMemo(() => {
+    const result: SectionItem[] = [];
+    let hideUntilLevel: number | null = null;
+
+    for (const item of items) {
+      if (item.type === "header") {
+        // If we're hiding and this header is same level or higher → stop hiding
+        if (hideUntilLevel !== null && item.level <= hideUntilLevel) {
+          hideUntilLevel = null;
+        }
+        if (hideUntilLevel !== null) {
+          // This header is nested under a collapsed parent — skip it
+          continue;
+        }
+        result.push(item);
+        // If this header is collapsed, start hiding items under it
+        if (collapsedHeaders.has(item.id)) {
+          hideUntilLevel = item.level;
+        }
+      } else {
+        if (hideUntilLevel === null) {
+          result.push(item);
+        }
+      }
+    }
+
+    return result;
+  }, [items, collapsedHeaders]);
+
   const handleItemDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
+    // Use the FULL items array for reordering (find by ID)
     const oldIndex = items.findIndex((item) => getItemId(item) === active.id);
     const newIndex = items.findIndex((item) => getItemId(item) === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
@@ -711,8 +849,8 @@ export default function SectionEditor({
           {/* Item count badge */}
           <span className="text-xs text-muted flex-shrink-0">
             {productCount} {productCount === 1 ? "product" : "products"}
-            {headerCount > 0 && ` · ${headerCount} ${headerCount === 1 ? "header" : "headers"}`}
-            {textCount > 0 && ` · ${textCount} ${textCount === 1 ? "text" : "texts"}`}
+            {headerCount > 0 && ` \u00B7 ${headerCount} ${headerCount === 1 ? "header" : "headers"}`}
+            {textCount > 0 && ` \u00B7 ${textCount} ${textCount === 1 ? "text" : "texts"}`}
           </span>
 
           {/* Layout toggle */}
@@ -765,11 +903,11 @@ export default function SectionEditor({
                 onDragEnd={handleItemDragEnd}
               >
                 <SortableContext
-                  items={items.map((item) => getItemId(item))}
+                  items={visibleItems.map((item) => getItemId(item))}
                   strategy={verticalListSortingStrategy}
                 >
                   <div className="space-y-1">
-                    {items.map((item) =>
+                    {visibleItems.map((item) =>
                       item.type === "product" ? (
                         <SortableProductRow
                           key={item.product_cache_id}
@@ -785,8 +923,12 @@ export default function SectionEditor({
                           key={item.id}
                           header={item}
                           sectionId={id}
+                          childCount={countHeaderChildren(items, items.indexOf(item))}
+                          isCollapsed={collapsedHeaders.has(item.id)}
                           onRemove={onRemoveItem}
                           onUpdate={onUpdateHeader}
+                          onToggleCollapse={toggleHeaderCollapse}
+                          onAddProducts={onAddProducts}
                         />
                       ) : (
                         <SortableTextRow

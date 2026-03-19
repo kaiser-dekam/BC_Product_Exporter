@@ -30,6 +30,9 @@ CREATE TABLE profiles (
   -- CSV preferences (stored as JSON)
   csv_preferences  JSONB DEFAULT NULL,
 
+  -- Sales book defaults (price display preferences)
+  book_preferences JSONB NOT NULL DEFAULT '{"show_price":true,"show_sale_price":false,"show_cost_price":false,"show_variants":true}',
+
   -- Sync metadata
   last_synced_at  TIMESTAMPTZ DEFAULT NULL,
   product_count   INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +77,9 @@ CREATE TABLE product_cache (
   claude_weight_dims      TEXT DEFAULT NULL,
   claude_model_used       TEXT DEFAULT NULL,
   summarized_at           TIMESTAMPTZ DEFAULT NULL,
+
+  -- BigCommerce variant snapshots (mapped to ProductVariant format)
+  variants                JSONB NOT NULL DEFAULT '[]',
 
   -- Sync metadata
   synced_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -187,3 +193,16 @@ ALTER TABLE book_versions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY book_versions_select ON book_versions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY book_versions_insert ON book_versions FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY book_versions_delete ON book_versions FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 8. Migrations (run these if the schema already exists)
+-- ============================================================================
+
+-- Add book_versions table (if not already applied)
+-- (Full DDL above in section 7)
+
+-- Add variants column to product_cache
+ALTER TABLE product_cache ADD COLUMN IF NOT EXISTS variants JSONB NOT NULL DEFAULT '[]';
+
+-- Add book_preferences to profiles
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS book_preferences JSONB NOT NULL DEFAULT '{"show_price":true,"show_sale_price":false,"show_cost_price":false,"show_variants":true}';

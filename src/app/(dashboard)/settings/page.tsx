@@ -74,6 +74,14 @@ export default function SettingsPage() {
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
   const [collaboratorsMessage, setCollaboratorsMessage] = useState<string | null>(null);
 
+  // Sales book defaults
+  const [bookShowPrice, setBookShowPrice] = useState(true);
+  const [bookShowSalePrice, setBookShowSalePrice] = useState(false);
+  const [bookShowCostPrice, setBookShowCostPrice] = useState(false);
+  const [bookShowVariants, setBookShowVariants] = useState(true);
+  const [bookDefaultsLoading, setBookDefaultsLoading] = useState(false);
+  const [bookDefaultsMessage, setBookDefaultsMessage] = useState<string | null>(null);
+
   // Admin settings
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-20250514");
   const [adminSettingsLoading, setAdminSettingsLoading] = useState(false);
@@ -100,6 +108,11 @@ export default function SettingsPage() {
         setHasSavedAnthropicKey(!!data.has_anthropic_key);
         setSystemPrompt(data.claude_system_prompt || "");
         setCollaboratorEmails(data.collaborator_emails || []);
+        const bp = data.book_preferences ?? {};
+        setBookShowPrice(bp.show_price ?? bp.show_main_price ?? true);
+        setBookShowSalePrice(bp.show_sale_price ?? false);
+        setBookShowCostPrice(bp.show_cost_price ?? false);
+        setBookShowVariants(bp.show_variants ?? true);
       } catch {
         // Silently fail on load - user can still fill in fields
       } finally {
@@ -375,6 +388,42 @@ export default function SettingsPage() {
       setCollaboratorsLoading(false);
     }
   }, [getIdToken, collaboratorEmails, autoClear]);
+
+  // Handler: Save Sales Book Defaults
+  const handleBookDefaultsSave = useCallback(async () => {
+    setBookDefaultsLoading(true);
+    setBookDefaultsMessage(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          book_preferences: {
+            show_price: bookShowPrice,
+            show_sale_price: bookShowSalePrice,
+            show_cost_price: bookShowCostPrice,
+            show_variants: bookShowVariants,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save book defaults");
+      }
+      setBookDefaultsMessage("Defaults saved.");
+      autoClear(setBookDefaultsMessage);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setBookDefaultsMessage(`Error: ${msg}`);
+      autoClear(setBookDefaultsMessage);
+    } finally {
+      setBookDefaultsLoading(false);
+    }
+  }, [getIdToken, bookShowPrice, bookShowSalePrice, bookShowCostPrice, bookShowVariants, autoClear]);
 
   // Handler: Save Admin Settings
   const handleAdminSettingsSave = useCallback(async () => {
@@ -782,7 +831,86 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          {/* Section 6: Admin Settings (only visible to admins) */}
+          {/* Section 6: Sales Book Defaults */}
+          <Card>
+            <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
+              Sales Book Defaults
+            </h3>
+            <p className="text-xs text-muted mb-4">
+              Default price display settings applied when new products are added to a sales book.
+              You can still override these per product.
+            </p>
+            <div className="space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={bookShowPrice}
+                  onChange={(e) => setBookShowPrice(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium group-hover:text-text transition-colors">Show regular price</p>
+                  <p className="text-xs text-muted">Display the base product price in the PDF</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={bookShowSalePrice}
+                  onChange={(e) => setBookShowSalePrice(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium group-hover:text-text transition-colors">Show sale price</p>
+                  <p className="text-xs text-muted">Display the sale price when available</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={bookShowCostPrice}
+                  onChange={(e) => setBookShowCostPrice(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium group-hover:text-text transition-colors">Show cost price</p>
+                  <p className="text-xs text-muted">Display the cost/wholesale price when available</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={bookShowVariants}
+                  onChange={(e) => setBookShowVariants(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium group-hover:text-text transition-colors">Show variants</p>
+                  <p className="text-xs text-muted">Display variant rows with individual pricing in the PDF</p>
+                </div>
+              </label>
+            </div>
+            <div className="flex items-center gap-3 mt-4">
+              <Button
+                onClick={handleBookDefaultsSave}
+                loading={bookDefaultsLoading}
+                size="sm"
+              >
+                Save Defaults
+              </Button>
+              {bookDefaultsMessage && (
+                <span
+                  className={`text-sm ${
+                    bookDefaultsMessage.startsWith("Error") ? "text-danger" : "text-success"
+                  }`}
+                >
+                  {bookDefaultsMessage}
+                </span>
+              )}
+            </div>
+          </Card>
+
+          {/* Section 7: Admin Settings (only visible to admins) */}
           {isAdmin && (
             <Card>
               <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
