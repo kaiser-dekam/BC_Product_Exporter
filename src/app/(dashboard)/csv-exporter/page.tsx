@@ -381,7 +381,7 @@ export default function CsvExporterPage() {
   // Main UI: field selection + export
   // ---------------------------------------------------------------------------
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto overflow-hidden">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold mb-1">CSV Exporter</h1>
