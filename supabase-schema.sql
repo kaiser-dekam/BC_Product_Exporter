@@ -33,6 +33,9 @@ CREATE TABLE profiles (
   -- Sales book defaults (price display preferences)
   book_preferences JSONB NOT NULL DEFAULT '{"show_price":true,"show_sale_price":false,"show_cost_price":false,"show_variants":true}',
 
+  -- Collaborator access (emails allowed to see this user's data)
+  collaborator_emails TEXT[] NOT NULL DEFAULT '{}',
+
   -- Sync metadata
   last_synced_at  TIMESTAMPTZ DEFAULT NULL,
   product_count   INTEGER NOT NULL DEFAULT 0,
@@ -206,3 +209,6 @@ ALTER TABLE product_cache ADD COLUMN IF NOT EXISTS variants JSONB NOT NULL DEFAU
 
 -- Add book_preferences to profiles
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS book_preferences JSONB NOT NULL DEFAULT '{"show_price":true,"show_sale_price":false,"show_cost_price":false,"show_variants":true}';
+
+-- Add collaborator_emails to profiles
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS collaborator_emails TEXT[] NOT NULL DEFAULT '{}';

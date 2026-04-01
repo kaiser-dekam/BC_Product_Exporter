@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, getAccessibleUserIds } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 // Fields for list view (excludes raw_data, description, image_urls, categories, category_names)
@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
+  const email = auth.user.email;
   const { searchParams } = new URL(req.url);
 
   const limit = Math.min(
@@ -30,13 +31,16 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = createAdminClient();
 
+    // Include products from collaborator accounts
+    const accessibleIds = await getAccessibleUserIds(uid, email);
+
     // Use offset-based pagination (cursor converted to offset for backward compat)
     const effectiveOffset = cursor ? Number(cursor) || 0 : offset;
 
     const { data: products, error, count } = await supabase
       .from("product_cache")
       .select(fields, { count: "exact" })
-      .eq("user_id", uid)
+      .in("user_id", accessibleIds)
       .order("name", { ascending: true })
       .range(effectiveOffset, effectiveOffset + limit - 1);
 

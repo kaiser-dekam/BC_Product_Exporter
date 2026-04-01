@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getSiteSettings } from "@/lib/api-helpers";
+import { authenticateRequest, getSiteSettings, getAccessibleUserIds } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/crypto";
 
@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
+  const email = auth.user.email;
 
   let body: { product_ids?: string[]; system_prompt?: string };
   try {
@@ -130,6 +131,8 @@ export async function POST(req: NextRequest) {
   const siteSettings = await getSiteSettings();
   const claudeModel = siteSettings.default_claude_model;
 
+  const accessibleIds = await getAccessibleUserIds(uid, email);
+
   const errors: string[] = [];
   let summarized = 0;
 
@@ -140,7 +143,7 @@ export async function POST(req: NextRequest) {
         .from("product_cache")
         .select("*")
         .eq("id", productId)
-        .eq("user_id", uid)
+        .in("user_id", accessibleIds)
         .single();
 
       if (fetchError || !productData) {

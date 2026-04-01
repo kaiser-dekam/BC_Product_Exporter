@@ -124,6 +124,38 @@ export async function resolveCredentials(
 }
 
 // ---------------------------------------------------------------------------
+// Collaborator helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns an array of user IDs whose data the current user can access.
+ * Includes their own uid plus any profile owners who have listed the
+ * current user's email in `collaborator_emails`.
+ */
+export async function getAccessibleUserIds(
+  uid: string,
+  email: string | undefined
+): Promise<string[]> {
+  const ids = [uid];
+
+  if (email) {
+    const supabase = createAdminClient();
+    const { data: sharedProfiles } = await supabase
+      .from("profiles")
+      .select("id")
+      .contains("collaborator_emails", [email]);
+
+    if (sharedProfiles) {
+      for (const p of sharedProfiles) {
+        if (!ids.includes(p.id)) ids.push(p.id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+// ---------------------------------------------------------------------------
 // Admin helpers
 // ---------------------------------------------------------------------------
 
