@@ -212,3 +212,57 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS book_preferences JSONB NOT NULL DE
 
 -- Add collaborator_emails to profiles
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS collaborator_emails TEXT[] NOT NULL DEFAULT '{}';
+
+-- ============================================================================
+-- 9. product_snapshots (Time Capsule backup metadata)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS product_snapshots (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id        UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  label          TEXT NOT NULL DEFAULT '',
+  product_count  INTEGER NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_snapshots_user_created
+  ON product_snapshots (user_id, created_at DESC);
+
+ALTER TABLE product_snapshots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY product_snapshots_select ON product_snapshots
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY product_snapshots_insert ON product_snapshots
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY product_snapshots_delete ON product_snapshots
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 10. product_snapshot_items (Time Capsule captured product data)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS product_snapshot_items (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  snapshot_id   UUID NOT NULL REFERENCES product_snapshots(id) ON DELETE CASCADE,
+  product_id    TEXT NOT NULL,
+  name          TEXT NOT NULL DEFAULT '',
+  sku           TEXT NOT NULL DEFAULT '',
+  price         NUMERIC(12,2) NOT NULL DEFAULT 0,
+  sale_price    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  cost_price    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  description   TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_items_snapshot
+  ON product_snapshot_items (snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_snapshot_items_name
+  ON product_snapshot_items (snapshot_id, name);
+
+ALTER TABLE product_snapshot_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY snapshot_items_select ON product_snapshot_items
+  FOR SELECT USING (EXISTS (
+    SELECT 1 FROM product_snapshots ps WHERE ps.id = snapshot_id AND ps.user_id = auth.uid()
+  ));
+CREATE POLICY snapshot_items_insert ON product_snapshot_items
+  FOR INSERT WITH CHECK (EXISTS (
+    SELECT 1 FROM product_snapshots ps WHERE ps.id = snapshot_id AND ps.user_id = auth.uid()
+  ));
