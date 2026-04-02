@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 
 // Fields for list view (excludes raw_data, description, image_urls, categories, category_names)
 const LIST_FIELDS =
-  "id, user_id, bigcommerce_product_id, name, sku, price, sale_price, cost_price, primary_image_url, brand_name, inventory_level, is_visible, availability, weight, width, height, depth, custom_url, claude_summary, claude_specs, claude_weight_dims, claude_model_used, summarized_at, synced_at";
+  "id, user_id, bigcommerce_product_id, name, sku, price, sale_price, cost_price, primary_image_url, brand_name, inventory_level, is_visible, availability, weight, width, height, depth, custom_url, claude_summary, claude_specs, claude_weight_dims, claude_model_used, summarized_at, synced_at, category_names";
 
 // Minimal fields for ProductPicker modal
 const PICKER_FIELDS =
