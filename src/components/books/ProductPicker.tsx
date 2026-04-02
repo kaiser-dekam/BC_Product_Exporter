@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
+import CategoryTreeSelect, { type CategoryNode } from "@/components/price-adjuster/CategoryTreeSelect";
 import type { ProductVariant } from "@/app/(dashboard)/books/[bookId]/page";
 
 interface PickerProduct {
@@ -21,6 +22,7 @@ interface PickerProduct {
   user_description?: string | null;
   description_source?: "ai" | "custom";
   is_custom?: boolean;
+  category_names?: string[];
 }
 
 interface ProductPickerProps {
@@ -49,11 +51,16 @@ const EMPTY_CUSTOM_FORM = { name: "", sku: "", price: "", image_url: "", descrip
 
 export default function ProductPicker({ open, onClose, onAdd, existingProductIds }: ProductPickerProps) {
   const { getIdToken } = useAuth();
-  const [activeTab, setActiveTab] = useState<"catalog" | "custom">("catalog");
+  const [activeTab, setActiveTab] = useState<"catalog" | "category" | "custom">("catalog");
   const [products, setProducts] = useState<PickerProduct[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Category tab state
+  const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("");
 
   // Custom product form state
   const [customForm, setCustomForm] = useState(EMPTY_CUSTOM_FORM);
@@ -101,16 +108,40 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
     }
   }, [getIdToken]);
 
+  // Fetch category tree
+  const fetchCategories = useCallback(async () => {
+    setCategoriesLoading(true);
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+
+      const res = await fetch("/api/bigcommerce/categories", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCategoryTree(data.categories || []);
+      }
+    } catch {
+      // Silent fail
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, [getIdToken]);
+
   useEffect(() => {
     if (open) {
       fetchProducts();
+      fetchCategories();
       setSelected(new Set());
       setSearch("");
       setActiveTab("catalog");
+      setSelectedCategory("");
       setCustomForm(EMPTY_CUSTOM_FORM);
       setCustomErrors({});
     }
-  }, [open, fetchProducts]);
+  }, [open, fetchProducts, fetchCategories]);
 
   // Client-side search filtering (no API calls)
   const filteredProducts = useMemo(() => {
@@ -127,6 +158,17 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
     (p) => !existingProductIds.includes(p.id)
   );
 
+  // Products filtered by selected category (excluding already-added)
+  const categoryProducts = useMemo(() => {
+    if (!selectedCategory) return [];
+    return products.filter(
+      (p) =>
+        p.category_names &&
+        p.category_names.includes(selectedCategory) &&
+        !existingProductIds.includes(p.id)
+    );
+  }, [products, selectedCategory, existingProductIds]);
+
   const toggleProduct = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -139,6 +181,12 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
   const handleAddFromCatalog = () => {
     const selectedProducts = products.filter((p) => selected.has(p.id));
     onAdd(selectedProducts);
+    onClose();
+  };
+
+  const handleAddFromCategory = () => {
+    if (categoryProducts.length === 0) return;
+    onAdd(categoryProducts);
     onClose();
   };
 
@@ -190,6 +238,14 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
             }`}
           >
             From Catalog
+          </button>
+          <button
+            onClick={() => setActiveTab("category")}
+            className={`flex-1 py-1.5 text-sm rounded-md transition-colors ${
+              activeTab === "category" ? "bg-accent text-[#0b0f1d] font-medium" : "text-muted hover:text-text"
+            }`}
+          >
+            By Category
           </button>
           <button
             onClick={() => setActiveTab("custom")}
@@ -262,6 +318,64 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
                 <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
                 <Button size="sm" onClick={handleAddFromCatalog} disabled={selected.size === 0}>
                   Add Selected
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : activeTab === "category" ? (
+          <>
+            {/* Category selector */}
+            <CategoryTreeSelect
+              categories={categoryTree}
+              selectedCategory={selectedCategory}
+              onSelect={setSelectedCategory}
+              loading={categoriesLoading}
+            />
+
+            {/* Preview of products in the selected category */}
+            <div className="max-h-80 overflow-y-auto space-y-1">
+              {!selectedCategory ? (
+                <div className="py-8 text-center text-sm text-muted">
+                  Select a category to see its products.
+                </div>
+              ) : loading ? (
+                <div className="py-8 text-center text-sm text-muted">Loading...</div>
+              ) : categoryProducts.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted">
+                  No available products in this category. They may already be added.
+                </div>
+              ) : (
+                categoryProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-transparent"
+                  >
+                    <div className="w-8 h-8 rounded bg-white/5 flex-shrink-0 overflow-hidden flex items-center justify-center">
+                      {product.primary_image_url ? (
+                        <img src={product.primary_image_url} alt="" className="w-full h-full object-contain" />
+                      ) : (
+                        <span className="text-[8px] text-muted">No img</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{product.name}</p>
+                      <p className="text-xs text-muted">{product.sku} &middot; ${product.price.toFixed(2)}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <span className="text-sm text-muted">
+                {selectedCategory
+                  ? `${categoryProducts.length} product${categoryProducts.length !== 1 ? "s" : ""} in "${selectedCategory}"`
+                  : "No category selected"}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+                <Button size="sm" onClick={handleAddFromCategory} disabled={categoryProducts.length === 0}>
+                  Add All ({categoryProducts.length})
                 </Button>
               </div>
             </div>

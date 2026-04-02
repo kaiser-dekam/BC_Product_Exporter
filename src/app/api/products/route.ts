@@ -8,7 +8,7 @@ const LIST_FIELDS =
 
 // Minimal fields for ProductPicker modal
 const PICKER_FIELDS =
-  "id, user_id, name, sku, price, sale_price, cost_price, primary_image_url, brand_name, claude_summary, variants";
+  "id, user_id, name, sku, price, sale_price, cost_price, primary_image_url, brand_name, claude_summary, variants, category_names";
 
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
@@ -37,12 +37,13 @@ export async function GET(req: NextRequest) {
     // Use offset-based pagination (cursor converted to offset for backward compat)
     const effectiveOffset = cursor ? Number(cursor) || 0 : offset;
 
-    const { data: products, error, count } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: products, error, count } = await (supabase
       .from("product_cache")
-      .select(fields, { count: "exact" })
+      .select(fields as any, { count: "exact" })
       .in("user_id", accessibleIds)
       .order("name", { ascending: true })
-      .range(effectiveOffset, effectiveOffset + limit - 1);
+      .range(effectiveOffset, effectiveOffset + limit - 1));
 
     if (error) throw error;
 
