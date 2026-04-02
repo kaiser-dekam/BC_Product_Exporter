@@ -6,7 +6,7 @@ import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import CategoryTreeSelect, { type CategoryNode } from "@/components/price-adjuster/CategoryTreeSelect";
-import type { ProductVariant } from "@/app/(dashboard)/books/[bookId]/page";
+import type { ProductVariant, SectionItem } from "@/app/(dashboard)/books/[bookId]/page";
 
 interface PickerProduct {
   id: string;
@@ -29,6 +29,7 @@ interface ProductPickerProps {
   open: boolean;
   onClose: () => void;
   onAdd: (products: PickerProduct[]) => void;
+  onAddItems?: (items: SectionItem[]) => void;
   existingProductIds: string[];
 }
 
@@ -49,7 +50,7 @@ function isCacheValid(): boolean {
 
 const EMPTY_CUSTOM_FORM = { name: "", sku: "", price: "", image_url: "", description: "" };
 
-export default function ProductPicker({ open, onClose, onAdd, existingProductIds }: ProductPickerProps) {
+export default function ProductPicker({ open, onClose, onAdd, onAddItems, existingProductIds }: ProductPickerProps) {
   const { getIdToken } = useAuth();
   const [activeTab, setActiveTab] = useState<"catalog" | "category" | "custom">("catalog");
   const [products, setProducts] = useState<PickerProduct[]>([]);
@@ -158,16 +159,49 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
     (p) => !existingProductIds.includes(p.id)
   );
 
-  // Products filtered by selected category (excluding already-added)
+  // Collect all category names in a subtree (node + all descendants)
+  const collectDescendantNames = useCallback(
+    (node: CategoryNode): string[] => {
+      const names = [node.name];
+      for (const child of node.children) {
+        names.push(...collectDescendantNames(child));
+      }
+      return names;
+    },
+    []
+  );
+
+  // Find a node in the category tree by name
+  const findCategoryNode = useCallback(
+    (nodes: CategoryNode[], name: string): CategoryNode | null => {
+      for (const node of nodes) {
+        if (node.name === name) return node;
+        const found = findCategoryNode(node.children, name);
+        if (found) return found;
+      }
+      return null;
+    },
+    []
+  );
+
+  // All category names in the selected subtree (selected + all descendants)
+  const subtreeCategoryNames = useMemo(() => {
+    if (!selectedCategory) return new Set<string>();
+    const node = findCategoryNode(categoryTree, selectedCategory);
+    if (!node) return new Set([selectedCategory]);
+    return new Set(collectDescendantNames(node));
+  }, [selectedCategory, categoryTree, findCategoryNode, collectDescendantNames]);
+
+  // Products filtered by selected category or ANY descendant (excluding already-added)
   const categoryProducts = useMemo(() => {
     if (!selectedCategory) return [];
     return products.filter(
       (p) =>
         p.category_names &&
-        p.category_names.includes(selectedCategory) &&
+        p.category_names.some((cn) => subtreeCategoryNames.has(cn)) &&
         !existingProductIds.includes(p.id)
     );
-  }, [products, selectedCategory, existingProductIds]);
+  }, [products, selectedCategory, subtreeCategoryNames, existingProductIds]);
 
   const toggleProduct = (id: string) => {
     setSelected((prev) => {
@@ -187,6 +221,90 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
   const handleAddFromCategory = () => {
     if (categoryProducts.length === 0) return;
     onAdd(categoryProducts);
+    onClose();
+  };
+
+  // Convert a PickerProduct to a ProductItem SectionItem
+  const toProductItem = (p: PickerProduct): SectionItem => ({
+    type: "product",
+    product_cache_id: p.id,
+    name: p.name,
+    sku: p.sku,
+    price: p.price,
+    sale_price: p.sale_price ?? null,
+    cost_price: p.cost_price ?? null,
+    primary_image_url: p.primary_image_url,
+    claude_summary: p.claude_summary,
+    user_description: p.user_description ?? null,
+    description_source: p.description_source ?? (p.claude_summary ? "ai" : "custom"),
+    is_custom: p.is_custom ?? false,
+    variants: p.variants ?? [],
+    show_price: true,
+    show_sale_price: false,
+    show_cost_price: false,
+    show_variants: true,
+  });
+
+  // Add products grouped by sub-category with H3 headers
+  const handleAddWithHeaders = () => {
+    if (categoryProducts.length === 0 || !onAddItems) return;
+
+    const selectedNode = findCategoryNode(categoryTree, selectedCategory);
+    const subCategories = selectedNode?.children ?? [];
+
+    // If no sub-categories, just add products without headers
+    if (subCategories.length === 0) {
+      onAdd(categoryProducts);
+      onClose();
+      return;
+    }
+
+    const items: SectionItem[] = [];
+    const placed = new Set<string>();
+
+    // For each direct child, collect ALL descendant names in that branch
+    // so products tagged with grandchild categories still get grouped correctly
+    for (const sub of subCategories) {
+      const branchNames = new Set(collectDescendantNames(sub));
+      const matching = categoryProducts.filter(
+        (p) =>
+          !placed.has(p.id) &&
+          p.category_names?.some((cn) => branchNames.has(cn))
+      );
+      if (matching.length === 0) continue;
+
+      // Add H3 header for this sub-category
+      items.push({
+        type: "header",
+        id: `header_${Date.now()}_${sub.id}`,
+        level: 3,
+        text: sub.name,
+      });
+
+      for (const p of matching) {
+        placed.add(p.id);
+        items.push(toProductItem(p));
+      }
+    }
+
+    // Add remaining products that only matched the parent category directly
+    const remaining = categoryProducts.filter((p) => !placed.has(p.id));
+    if (remaining.length > 0) {
+      // If ALL products are remaining (none matched sub-categories), skip the "Other" header
+      if (placed.size > 0) {
+        items.push({
+          type: "header",
+          id: `header_${Date.now()}_other`,
+          level: 3,
+          text: "Other",
+        });
+      }
+      for (const p of remaining) {
+        items.push(toProductItem(p));
+      }
+    }
+
+    onAddItems(items);
     onClose();
   };
 
@@ -374,6 +492,17 @@ export default function ProductPicker({ open, onClose, onAdd, existingProductIds
               </span>
               <div className="flex gap-2">
                 <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+                {onAddItems && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleAddWithHeaders}
+                    disabled={categoryProducts.length === 0}
+                    title="Add all products grouped by sub-category with H3 headers"
+                  >
+                    Add with Headers
+                  </Button>
+                )}
                 <Button size="sm" onClick={handleAddFromCategory} disabled={categoryProducts.length === 0}>
                   Add All ({categoryProducts.length})
                 </Button>

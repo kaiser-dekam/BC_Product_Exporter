@@ -787,6 +787,42 @@ export default function BookEditorPage({
     [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs]
   );
 
+  // Handle adding mixed items (products + headers) from category picker
+  const handleAddItems = useCallback(
+    (items: SectionItem[]) => {
+      if (!book || !pickerSectionId) return;
+
+      // Apply book prefs to product items
+      const enrichedItems = items.map((item) => {
+        if (item.type !== "product") return item;
+        return {
+          ...item,
+          show_price: item.show_price ?? bookPrefs.show_price,
+          show_sale_price: item.show_sale_price ?? bookPrefs.show_sale_price,
+          show_cost_price: item.show_cost_price ?? bookPrefs.show_cost_price,
+          show_variants: item.show_variants ?? bookPrefs.show_variants,
+        };
+      });
+
+      const updated = {
+        ...book,
+        sections: book.sections.map((s) => {
+          if (s.id !== pickerSectionId) return s;
+          if (pickerInsertAfterId) {
+            const idx = s.items.findIndex((i) => getItemId(i) === pickerInsertAfterId);
+            if (idx !== -1) {
+              return { ...s, items: [...s.items.slice(0, idx + 1), ...enrichedItems, ...s.items.slice(idx + 1)] };
+            }
+          }
+          return { ...s, items: [...s.items, ...enrichedItems] };
+        }),
+      };
+      setBook(updated);
+      saveBook(updated);
+    },
+    [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs]
+  );
+
   // Get existing product IDs in the current picker section
   const existingProductIds = pickerSectionId && book
     ? book.sections
@@ -1121,6 +1157,7 @@ export default function BookEditorPage({
           setPickerInsertAfterId(null);
         }}
         onAdd={handleAddProducts}
+        onAddItems={handleAddItems}
         existingProductIds={existingProductIds}
       />
     </div>
