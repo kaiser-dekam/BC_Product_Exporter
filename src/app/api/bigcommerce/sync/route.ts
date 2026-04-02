@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, resolveCredentials } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
-import { fetchProducts, fetchBrandMap, fetchVariantsForProduct } from "@/lib/bigcommerce/client";
+import { fetchProducts, fetchBrandMap, fetchCategoryMap, fetchVariantsForProduct } from "@/lib/bigcommerce/client";
 
 // Batch size for parallel variant fetching — keeps BC API calls manageable
 const VARIANT_CHUNK = 25;
@@ -45,7 +45,10 @@ export async function POST(req: NextRequest) {
     const products = await fetchProducts(resolved.config, {
       includeVariants: false,
     });
-    const brandMap = await fetchBrandMap(resolved.config);
+    const [brandMap, categoryMap] = await Promise.all([
+      fetchBrandMap(resolved.config),
+      fetchCategoryMap(resolved.config),
+    ]);
 
     // -----------------------------------------------------------------------
     // Fetch variants for all products in parallel chunks to avoid BC rate limits
@@ -96,7 +99,9 @@ export async function POST(req: NextRequest) {
         image_urls: (product.images || []).map((img) => img.url_standard),
         brand_name: brandMap[product.brand_id ?? 0] || "",
         categories: product.categories || [],
-        category_names: [] as string[],
+        category_names: (product.categories || [])
+          .map((id) => categoryMap[id])
+          .filter(Boolean),
         inventory_level: product.inventory_level || 0,
         is_visible: product.is_visible ?? true,
         availability: product.availability || "",

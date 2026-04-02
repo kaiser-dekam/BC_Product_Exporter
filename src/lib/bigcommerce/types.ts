@@ -75,3 +75,9 @@ export interface BigCommerceBrand {
   id: number;
   name: string;
 }
+
+export interface BigCommerceCategory {
+  id: number;
+  name: string;
+  parent_id: number;
+}

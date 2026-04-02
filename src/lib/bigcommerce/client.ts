@@ -3,6 +3,7 @@ import type {
   BigCommerceProduct,
   BigCommerceVariant,
   BigCommerceBrand,
+  BigCommerceCategory,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -246,4 +247,68 @@ export async function fetchBrandMap(
   }
 
   return brandMap;
+}
+
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
+
+export async function fetchCategories(
+  config: BigCommerceConfig,
+  pageSize = 250,
+): Promise<BigCommerceCategory[]> {
+  const endpoint = `${baseUrl(config)}/catalog/categories`;
+  const headers = buildHeaders(config);
+
+  const allCategories: BigCommerceCategory[] = [];
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `BigCommerce API error (${response.status}): ${text}`,
+      );
+    }
+
+    const payload = await response.json();
+    const data: BigCommerceCategory[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allCategories.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allCategories;
+}
+
+export async function fetchCategoryMap(
+  config: BigCommerceConfig,
+): Promise<Record<number, string>> {
+  const categories = await fetchCategories(config);
+  const map: Record<number, string> = {};
+  for (const cat of categories) {
+    map[cat.id] = cat.name;
+  }
+  return map;
 }
