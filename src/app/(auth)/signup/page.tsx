@@ -50,14 +50,14 @@ export default function SignupPage() {
       <Card className="w-full max-w-md">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-accent to-accent-2 grid place-items-center text-[#0b1020] font-extrabold text-[15px]">
-            B
+            C
           </div>
-          <span className="font-bold tracking-wide text-lg">BigCSV.co</span>
+          <span className="font-bold tracking-wide text-lg">CatalogPilot</span>
         </div>
 
         <h2 className="text-xl font-semibold mb-1">Create an account</h2>
         <p className="text-muted text-sm mb-6">
-          Sign up to get started with BigCSV tools.
+          Sign up to get started with CatalogPilot.
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

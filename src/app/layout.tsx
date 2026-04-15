@@ -10,7 +10,7 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "BigCSV.co - BigCommerce Product Tools",
+  title: "CatalogPilot - BigCommerce Product Tools",
   description:
     "Export product data, build sales books, and manage your BigCommerce catalog.",
 };

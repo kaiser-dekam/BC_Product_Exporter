@@ -73,9 +73,9 @@ export default function Home() {
       <header className="flex items-center justify-between px-8 py-5 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-accent to-accent-2 grid place-items-center text-[#0b1020] font-extrabold text-[15px]">
-            B
+            C
           </div>
-          <span className="font-bold tracking-wide text-lg">BigCSV.co</span>
+          <span className="font-bold tracking-wide text-lg">CatalogPilot</span>
         </div>
         <Link
           href="/signup"
@@ -131,10 +131,10 @@ export default function Home() {
           <Card className="w-full max-w-md">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-accent to-accent-2 grid place-items-center text-[#0b1020] font-extrabold text-[15px]">
-                B
+                C
               </div>
               <span className="font-bold tracking-wide text-lg">
-                BigCSV.co
+                CatalogPilot
               </span>
             </div>
 

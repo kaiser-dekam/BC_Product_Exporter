@@ -60,9 +60,9 @@ export default function Sidebar() {
       <div className="p-5 border-b border-border">
         <Link href="/dashboard" className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-accent to-accent-2 grid place-items-center text-[#0b1020] font-extrabold text-[15px]">
-            B
+            C
           </div>
-          <span className="font-bold tracking-wide">BigCSV.co</span>
+          <span className="font-bold tracking-wide">CatalogPilot</span>
         </Link>
       </div>
 
