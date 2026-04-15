@@ -81,3 +81,23 @@ export interface BigCommerceCategory {
   name: string;
   parent_id: number;
 }
+
+export interface BigCommercePriceList {
+  id: number;
+  name: string;
+  active: boolean;
+  date_created: string;
+  date_modified: string;
+}
+
+export interface BigCommercePriceListRecord {
+  price_list_id: number;
+  variant_id: number;
+  price: number | null;
+  sale_price: number | null;
+  retail_price: number | null;
+  calculated_price: number | null;
+  currency: string;
+  product_id: number;
+  sku: string;
+}

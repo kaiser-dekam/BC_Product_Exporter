@@ -2,16 +2,41 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: "grid" },
-  { href: "/csv-exporter", label: "CSV Exporter", icon: "file-text" },
-  { href: "/product-library", label: "Product Library", icon: "package" },
-  { href: "/price-adjuster", label: "Price Adjuster", icon: "dollar" },
-  { href: "/books", label: "Sales Books", icon: "book" },
-  { href: "/time-capsule", label: "Time Capsule", icon: "clock" },
+// `gated: true` items require an active subscription. Settings stays
+// accessible so users can still manage their account if locked out.
+const navItems: {
+  href: string;
+  label: string;
+  icon: string;
+  gated?: boolean;
+}[] = [
+  { href: "/dashboard", label: "Dashboard", icon: "grid", gated: true },
+  { href: "/csv-exporter", label: "CSV Exporter", icon: "file-text", gated: true },
+  { href: "/product-library", label: "Product Library", icon: "package", gated: true },
+  { href: "/price-adjuster", label: "Price Adjuster", icon: "dollar", gated: true },
+  { href: "/books", label: "Sales Books", icon: "book", gated: true },
+  { href: "/time-capsule", label: "Time Capsule", icon: "clock", gated: true },
   { href: "/settings", label: "Settings", icon: "settings" },
 ];
+
+const LockIcon = () => (
+  <svg
+    className="w-4 h-4 ml-auto text-muted"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    strokeWidth={2}
+    aria-label="Requires subscription"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+    />
+  </svg>
+);
 
 const icons: Record<string, React.ReactNode> = {
   grid: (
@@ -54,6 +79,12 @@ const icons: Record<string, React.ReactNode> = {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { subscription, subscriptionLoading, isAdmin } = useAuth();
+
+  // Only show lock icons once we know the sub status — otherwise they'd
+  // flash on for entitled users on page load.
+  const entitled = isAdmin || subscription?.entitled === true;
+  const showLocks = !subscriptionLoading && !entitled;
 
   return (
     <aside className="w-64 min-h-screen bg-panel border-r border-border flex flex-col">
@@ -69,20 +100,24 @@ export default function Sidebar() {
       <nav className="flex-1 p-3 flex flex-col gap-1">
         {navItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          const isLocked = showLocks && item.gated;
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={isLocked ? "/billing" : item.href}
+              title={isLocked ? "Requires an active subscription" : undefined}
               className={`
                 flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors
                 ${isActive
                   ? "bg-accent/10 text-accent"
                   : "text-muted hover:text-text hover:bg-white/5"
                 }
+                ${isLocked ? "opacity-60" : ""}
               `}
             >
               {icons[item.icon]}
-              {item.label}
+              <span>{item.label}</span>
+              {isLocked && <LockIcon />}
             </Link>
           );
         })}

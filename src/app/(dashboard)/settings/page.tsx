@@ -79,8 +79,18 @@ export default function SettingsPage() {
   const [bookShowSalePrice, setBookShowSalePrice] = useState(false);
   const [bookShowCostPrice, setBookShowCostPrice] = useState(false);
   const [bookShowVariants, setBookShowVariants] = useState(true);
+  const [bookShowPriceList, setBookShowPriceList] = useState(false);
   const [bookDefaultsLoading, setBookDefaultsLoading] = useState(false);
   const [bookDefaultsMessage, setBookDefaultsMessage] = useState<string | null>(null);
+
+  // Price Lists
+  const [priceLists, setPriceLists] = useState<Array<{ id: string; name: string; record_count: number; created_at: string }>>([]);
+  const [priceListsLoading, setPriceListsLoading] = useState(false);
+  const [priceListImportName, setPriceListImportName] = useState("");
+  const [priceListImportFile, setPriceListImportFile] = useState<File | null>(null);
+  const [priceListImporting, setPriceListImporting] = useState(false);
+  const [priceListSyncing, setPriceListSyncing] = useState(false);
+  const [priceListMessage, setPriceListMessage] = useState<string | null>(null);
 
   // Admin settings
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-20250514");
@@ -113,6 +123,7 @@ export default function SettingsPage() {
         setBookShowSalePrice(bp.show_sale_price ?? false);
         setBookShowCostPrice(bp.show_cost_price ?? false);
         setBookShowVariants(bp.show_variants ?? true);
+        setBookShowPriceList(bp.show_price_list ?? false);
       } catch {
         // Silently fail on load - user can still fill in fields
       } finally {
@@ -141,6 +152,28 @@ export default function SettingsPage() {
     }
     loadAdminSettings();
   }, [isAdmin, getIdToken]);
+
+  // Load price lists on mount
+  useEffect(() => {
+    async function loadPriceLists() {
+      setPriceListsLoading(true);
+      try {
+        const token = await getIdToken();
+        const res = await fetch("/api/price-lists", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPriceLists(data.price_lists || []);
+        }
+      } catch {
+        // Non-critical
+      } finally {
+        setPriceListsLoading(false);
+      }
+    }
+    loadPriceLists();
+  }, [getIdToken]);
 
   // Auto-clear helper
   const autoClear = useCallback(
@@ -407,6 +440,7 @@ export default function SettingsPage() {
             show_sale_price: bookShowSalePrice,
             show_cost_price: bookShowCostPrice,
             show_variants: bookShowVariants,
+            show_price_list: bookShowPriceList,
           },
         }),
       });
@@ -423,7 +457,150 @@ export default function SettingsPage() {
     } finally {
       setBookDefaultsLoading(false);
     }
-  }, [getIdToken, bookShowPrice, bookShowSalePrice, bookShowCostPrice, bookShowVariants, autoClear]);
+  }, [getIdToken, bookShowPrice, bookShowSalePrice, bookShowCostPrice, bookShowVariants, bookShowPriceList, autoClear]);
+
+  // Handler: Sync Price Lists from BigCommerce
+  const handlePriceListSync = useCallback(async () => {
+    setPriceListSyncing(true);
+    setPriceListMessage(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch("/api/bigcommerce/price-lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Sync failed");
+      }
+
+      const data = await res.json();
+      setPriceListMessage(data.message || "Price lists synced.");
+      autoClear(setPriceListMessage);
+
+      // Reload price lists after sync
+      const listRes = await fetch("/api/price-lists", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        setPriceLists(listData.price_lists || []);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setPriceListMessage(`Error: ${msg}`);
+      autoClear(setPriceListMessage);
+    } finally {
+      setPriceListSyncing(false);
+    }
+  }, [getIdToken, autoClear]);
+
+  // Handler: Import Price List CSV
+  const handlePriceListImport = useCallback(async () => {
+    if (!priceListImportFile || !priceListImportName.trim()) return;
+
+    setPriceListImporting(true);
+    setPriceListMessage(null);
+
+    try {
+      // Parse CSV client-side — handles quoted fields with commas
+      const text = await priceListImportFile.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) throw new Error("CSV must have a header row and at least one data row");
+
+      // Parse a single CSV line respecting quoted fields
+      function parseCsvLine(line: string): string[] {
+        const cols: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') {
+              current += '"';
+              i++; // skip escaped quote
+            } else if (ch === '"') {
+              inQuotes = false;
+            } else {
+              current += ch;
+            }
+          } else {
+            if (ch === '"') {
+              inQuotes = true;
+            } else if (ch === ",") {
+              cols.push(current.trim());
+              current = "";
+            } else {
+              current += ch;
+            }
+          }
+        }
+        cols.push(current.trim());
+        return cols;
+      }
+
+      const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
+      const skuIdx = headers.findIndex((h) => h === "sku" || h === "variant_sku" || h === "product_sku");
+      const priceIdx = headers.findIndex((h) => h === "price" || h === "customer_price" || h === "list_price");
+
+      if (skuIdx === -1) throw new Error("CSV must have a 'sku' column (found: " + headers.join(", ") + ")");
+      if (priceIdx === -1) throw new Error("CSV must have a 'price' column (found: " + headers.join(", ") + ")");
+
+      const records: Array<{ sku: string; price: number }> = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCsvLine(lines[i]);
+        const sku = cols[skuIdx];
+        const price = parseFloat(cols[priceIdx]);
+        if (sku && !isNaN(price)) {
+          records.push({ sku, price });
+        }
+      }
+
+      if (records.length === 0) throw new Error("No valid SKU/price rows found in CSV");
+
+      const token = await getIdToken();
+      const res = await fetch("/api/price-lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: priceListImportName.trim(), records }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to import price list");
+      }
+
+      const data = await res.json();
+      setPriceLists((prev) => [data.price_list, ...prev]);
+      setPriceListImportName("");
+      setPriceListImportFile(null);
+      setPriceListMessage(`Imported "${data.price_list.name}" with ${data.price_list.record_count} prices.`);
+      autoClear(setPriceListMessage);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setPriceListMessage(`Error: ${msg}`);
+      autoClear(setPriceListMessage);
+    } finally {
+      setPriceListImporting(false);
+    }
+  }, [getIdToken, priceListImportFile, priceListImportName, autoClear]);
+
+  // Handler: Delete Price List
+  const handlePriceListDelete = useCallback(async (id: string) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/price-lists/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to delete");
+      setPriceLists((prev) => prev.filter((pl) => pl.id !== id));
+    } catch {
+      // Silently fail — user can retry
+    }
+  }, [getIdToken]);
 
   // Handler: Save Admin Settings
   const handleAdminSettingsSave = useCallback(async () => {
@@ -889,6 +1066,18 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted">Display variant rows with individual pricing in the PDF</p>
                 </div>
               </label>
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={bookShowPriceList}
+                  onChange={(e) => setBookShowPriceList(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-accent focus:ring-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium group-hover:text-text transition-colors">Show price list price</p>
+                  <p className="text-xs text-muted">Display the price list price when available (imported from BigCommerce Price Lists)</p>
+                </div>
+              </label>
             </div>
             <div className="flex items-center gap-3 mt-4">
               <Button
@@ -910,7 +1099,103 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          {/* Section 7: Admin Settings (only visible to admins) */}
+          {/* Section 7: Price Lists */}
+          <Card>
+            <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-1">
+              Price Lists
+            </h3>
+            <p className="text-xs text-muted mb-4">
+              Sync your BigCommerce Price Lists to display customer-group pricing in the Product Library, Price Adjuster, and Sales Books.
+            </p>
+
+            {/* Primary: Sync from BigCommerce */}
+            <div className="flex items-center gap-3 mb-5">
+              <Button
+                onClick={handlePriceListSync}
+                loading={priceListSyncing}
+                size="sm"
+              >
+                {priceListSyncing ? "Syncing…" : "Sync from BigCommerce"}
+              </Button>
+              {priceListMessage && (
+                <span className={`text-sm ${priceListMessage.startsWith("Error") ? "text-danger" : "text-success"}`}>
+                  {priceListMessage}
+                </span>
+              )}
+            </div>
+
+            {/* Existing price lists */}
+            {priceListsLoading ? (
+              <p className="text-xs text-muted">Loading price lists…</p>
+            ) : priceLists.length === 0 ? (
+              <p className="text-xs text-muted">No price lists synced yet. Click &quot;Sync from BigCommerce&quot; to import.</p>
+            ) : (
+              <div className="space-y-2 mb-5">
+                {priceLists.map((pl) => (
+                  <div key={pl.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/5">
+                    <div>
+                      <p className="text-sm font-medium">{pl.name}</p>
+                      <p className="text-xs text-muted">{pl.record_count.toLocaleString()} prices · {new Date(pl.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <button
+                      onClick={() => handlePriceListDelete(pl.id)}
+                      className="text-muted hover:text-danger transition-colors p-1 rounded"
+                      title="Delete price list"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Fallback: Manual CSV import */}
+            <details className="group">
+              <summary className="text-xs text-muted cursor-pointer hover:text-text transition-colors list-none flex items-center gap-1">
+                <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                Manual CSV import
+              </summary>
+              <div className="mt-3 space-y-3 pl-4 border-l border-border">
+                <p className="text-xs text-muted">
+                  Import a custom price list from a CSV file. Must have a <code className="bg-white/5 px-1 rounded">sku</code> column and a <code className="bg-white/5 px-1 rounded">price</code> column.
+                </p>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Price List Name</label>
+                  <input
+                    type="text"
+                    value={priceListImportName}
+                    onChange={(e) => setPriceListImportName(e.target.value)}
+                    placeholder="e.g. Wholesale, VIP, Contractor"
+                    className="w-full bg-white/5 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">CSV File</label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => setPriceListImportFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-muted file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-accent/10 file:text-accent hover:file:bg-accent/20 cursor-pointer"
+                  />
+                </div>
+                <Button
+                  onClick={handlePriceListImport}
+                  loading={priceListImporting}
+                  disabled={!priceListImportName.trim() || !priceListImportFile}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Import CSV
+                </Button>
+              </div>
+            </details>
+          </Card>
+
+          {/* Section 8: Admin Settings (only visible to admins) */}
           {isAdmin && (
             <Card>
               <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">

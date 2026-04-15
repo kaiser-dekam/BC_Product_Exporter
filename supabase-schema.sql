@@ -266,3 +266,94 @@ CREATE POLICY snapshot_items_insert ON product_snapshot_items
   FOR INSERT WITH CHECK (EXISTS (
     SELECT 1 FROM product_snapshots ps WHERE ps.id = snapshot_id AND ps.user_id = auth.uid()
   ));
+
+-- ============================================================================
+-- 11. price_lists (BigCommerce Price List metadata)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS price_lists (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id          UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  bigcommerce_id   INTEGER DEFAULT NULL,   -- BC price list ID; NULL for manually imported (CSV)
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_lists_user ON price_lists (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_user_bc_id ON price_lists (user_id, bigcommerce_id) WHERE bigcommerce_id IS NOT NULL;
+
+ALTER TABLE price_lists ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY price_lists_select ON price_lists FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY price_lists_insert ON price_lists FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY price_lists_delete ON price_lists FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 12. price_list_records (SKU → price mappings per price list)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS price_list_records (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  price_list_id   UUID NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
+  sku             TEXT NOT NULL,
+  price           NUMERIC(12,2) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_list_records_list_sku ON price_list_records (price_list_id, sku);
+
+ALTER TABLE price_list_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY price_list_records_select ON price_list_records FOR SELECT USING (
+  EXISTS (SELECT 1 FROM price_lists pl WHERE pl.id = price_list_id AND pl.user_id = auth.uid())
+);
+CREATE POLICY price_list_records_insert ON price_list_records FOR INSERT WITH CHECK (
+  EXISTS (SELECT 1 FROM price_lists pl WHERE pl.id = price_list_id AND pl.user_id = auth.uid())
+);
+CREATE POLICY price_list_records_delete ON price_list_records FOR DELETE USING (
+  EXISTS (SELECT 1 FROM price_lists pl WHERE pl.id = price_list_id AND pl.user_id = auth.uid())
+);
+
+-- Migration: add show_price_list to book_preferences default
+-- Run these if the schema already exists:
+-- ALTER TABLE profiles ALTER COLUMN book_preferences SET DEFAULT
+--   '{"show_price":true,"show_sale_price":false,"show_cost_price":false,"show_variants":true,"show_price_list":false}';
+-- ALTER TABLE price_lists ADD COLUMN IF NOT EXISTS bigcommerce_id INTEGER DEFAULT NULL;
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_user_bc_id ON price_lists (user_id, bigcommerce_id) WHERE bigcommerce_id IS NOT NULL;
+
+-- ============================================================================
+-- user_subscriptions (Stripe billing)
+-- ============================================================================
+-- One row per user. Webhook upserts on stripe_customer_id.
+-- status mirrors Stripe subscription status: active, trialing, past_due,
+-- canceled, incomplete, incomplete_expired, unpaid, paused.
+-- "grandfathered" is a non-Stripe status used for users that existed before
+-- the paywall launch — they get permanent free access.
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+  user_id                 UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+  stripe_customer_id      TEXT UNIQUE,
+  stripe_subscription_id  TEXT UNIQUE,
+  stripe_price_id         TEXT,
+  plan                    TEXT CHECK (plan IN ('monthly', 'yearly')),
+  status                  TEXT NOT NULL DEFAULT 'incomplete',
+  current_period_end      TIMESTAMPTZ,
+  trial_end               TIMESTAMPTZ,
+  cancel_at_period_end    BOOLEAN NOT NULL DEFAULT FALSE,
+  -- When status flips to past_due, set this so we can grant 3 days of grace.
+  past_due_since          TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_customer ON user_subscriptions (stripe_customer_id);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_subscription ON user_subscriptions (stripe_subscription_id);
+
+ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY user_subscriptions_select_own ON user_subscriptions
+  FOR SELECT USING (user_id = auth.uid());
+
+-- Insert/update only via service role (webhook + checkout API). No client-side writes.
+
+-- One-time grandfather migration: mark all existing users active so they
+-- aren't paywalled when this ships. Run AFTER creating the table; safe to re-run.
+INSERT INTO user_subscriptions (user_id, status, plan)
+SELECT id, 'grandfathered', NULL FROM profiles
+ON CONFLICT (user_id) DO NOTHING;

@@ -44,6 +44,8 @@ export interface ProductItem {
   price: number;
   sale_price?: number | null;
   cost_price?: number | null;
+  price_list_price?: number | null;      // price from an imported BigCommerce Price List
+  price_list_label?: string;             // name of the price list (e.g. "Wholesale")
   primary_image_url: string;
   claude_summary: string | null;
   user_description: string | null;       // user-written custom description
@@ -54,6 +56,7 @@ export interface ProductItem {
   show_sale_price?: boolean;             // default false — show sale price in PDF
   show_cost_price?: boolean;             // default false — show cost price in PDF
   show_variants?: boolean;               // default true  — show variant rows in PDF
+  show_price_list?: boolean;             // default false — show price list price in PDF
 }
 
 export interface HeaderItem {
@@ -169,12 +172,20 @@ export default function BookEditorPage({
     show_sale_price: boolean;
     show_cost_price: boolean;
     show_variants: boolean;
+    show_price_list: boolean;
   }>({
     show_price: true,
     show_sale_price: false,
     show_cost_price: false,
     show_variants: true,
+    show_price_list: false,
   });
+
+  // Price lists for look-up when adding products
+  const [priceLists, setPriceLists] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedPriceListId, setSelectedPriceListId] = useState<string>("");
+  const [priceMap, setPriceMap] = useState<Record<string, number>>({});
+  const [priceListName, setPriceListName] = useState<string>("");
 
   // Version snapshots
   const [versions, setVersions] = useState<Array<{ id: string; label: string; created_at: string }>>([]);
@@ -237,6 +248,7 @@ export default function BookEditorPage({
             show_sale_price: bp.show_sale_price ?? false,
             show_cost_price: bp.show_cost_price ?? false,
             show_variants: bp.show_variants ?? true,
+            show_price_list: bp.show_price_list ?? false,
           });
         }
       } catch {
@@ -245,6 +257,56 @@ export default function BookEditorPage({
     }
     loadPrefs();
   }, [getIdToken]);
+
+  // Load price lists
+  useEffect(() => {
+    async function loadPriceLists() {
+      try {
+        const token = await getIdToken();
+        if (!token) return;
+        const res = await fetch("/api/price-lists", { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const data = await res.json();
+          const lists = data.price_lists || [];
+          setPriceLists(lists);
+          // Auto-select first price list if any exist
+          if (lists.length > 0 && !selectedPriceListId) {
+            setSelectedPriceListId(lists[0].id);
+          }
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+    loadPriceLists();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getIdToken]);
+
+  // Fetch price map when selected price list changes
+  useEffect(() => {
+    if (!selectedPriceListId) {
+      setPriceMap({});
+      setPriceListName("");
+      return;
+    }
+    async function loadPriceMap() {
+      try {
+        const token = await getIdToken();
+        if (!token) return;
+        const res = await fetch(`/api/price-lists/${selectedPriceListId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPriceMap(data.price_map || {});
+          setPriceListName(data.name || "");
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+    loadPriceMap();
+  }, [selectedPriceListId, getIdToken]);
 
   // -----------------------------------------------------------------------
   // Save book
@@ -691,7 +753,7 @@ export default function BookEditorPage({
   );
 
   const updateProductOptions = useCallback(
-    (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean }) => {
+    (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean; show_price_list?: boolean }) => {
       if (!book) return;
       const updated = {
         ...book,
@@ -764,6 +826,9 @@ export default function BookEditorPage({
           show_sale_price: bookPrefs.show_sale_price,
           show_cost_price: bookPrefs.show_cost_price,
           show_variants: bookPrefs.show_variants,
+          show_price_list: bookPrefs.show_price_list,
+          price_list_price: (selectedPriceListId && p.sku && priceMap[p.sku] != null) ? priceMap[p.sku] : null,
+          price_list_label: priceListName || undefined,
         };
       });
 
@@ -784,7 +849,7 @@ export default function BookEditorPage({
       setBook(updated);
       saveBook(updated);
     },
-    [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs]
+    [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs, selectedPriceListId, priceMap, priceListName]
   );
 
   // Handle adding mixed items (products + headers) from category picker
@@ -801,6 +866,9 @@ export default function BookEditorPage({
           show_sale_price: item.show_sale_price ?? bookPrefs.show_sale_price,
           show_cost_price: item.show_cost_price ?? bookPrefs.show_cost_price,
           show_variants: item.show_variants ?? bookPrefs.show_variants,
+          show_price_list: item.show_price_list ?? bookPrefs.show_price_list,
+          price_list_price: (selectedPriceListId && item.sku && priceMap[item.sku] != null) ? priceMap[item.sku] : (item.price_list_price ?? null),
+          price_list_label: priceListName || item.price_list_label,
         };
       });
 
@@ -820,7 +888,7 @@ export default function BookEditorPage({
       setBook(updated);
       saveBook(updated);
     },
-    [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs]
+    [book, pickerSectionId, pickerInsertAfterId, saveBook, bookPrefs, selectedPriceListId, priceMap, priceListName]
   );
 
   // Get existing product IDs in the current picker section
@@ -927,8 +995,21 @@ export default function BookEditorPage({
             />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {saveMessage && <span className="text-sm text-success">{saveMessage}</span>}
+          {priceLists.length > 0 && (
+            <select
+              value={selectedPriceListId}
+              onChange={(e) => setSelectedPriceListId(e.target.value)}
+              className="bg-panel border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/50"
+              title="Price list used when adding products"
+            >
+              <option value="">No price list</option>
+              {priceLists.map((pl) => (
+                <option key={pl.id} value={pl.id}>{pl.name}</option>
+              ))}
+            </select>
+          )}
           <Button
             onClick={syncSummaries}
             loading={syncing}

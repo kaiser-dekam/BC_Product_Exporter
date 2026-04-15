@@ -13,16 +13,30 @@ import type { User } from "@supabase/supabase-js";
 
 type UserRole = "admin" | "user";
 
+export interface SubscriptionInfo {
+  entitled: boolean;
+  is_admin: boolean;
+  status: string | null;
+  plan: "monthly" | "yearly" | null;
+  current_period_end: string | null;
+  trial_end: string | null;
+  cancel_at_period_end: boolean;
+  has_stripe_customer: boolean;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   role: UserRole | null;
   isAdmin: boolean;
+  subscription: SubscriptionInfo | null;
+  subscriptionLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<User>;
   signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
   refreshRole: () => Promise<void>;
+  refreshSubscription: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -33,6 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<UserRole | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   // Fetch role from profile API
   const fetchRole = useCallback(async (accessToken: string) => {
@@ -51,31 +67,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Fetch subscription status
+  const fetchSubscription = useCallback(async (accessToken: string) => {
+    setSubscriptionLoading(true);
+    try {
+      const res = await fetch("/api/subscription", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        setSubscription((await res.json()) as SubscriptionInfo);
+      } else {
+        setSubscription(null);
+      }
+    } catch {
+      setSubscription(null);
+    } finally {
+      setSubscriptionLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.access_token) {
         fetchRole(session.access_token);
+        fetchSubscription(session.access_token);
+      } else {
+        setSubscriptionLoading(false);
       }
       setLoading(false);
     });
 
     // Listen for auth state changes
     const {
-      data: { subscription },
+      data: { subscription: authSub },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.access_token) {
         fetchRole(session.access_token);
+        fetchSubscription(session.access_token);
       } else {
         setRole(null);
+        setSubscription(null);
+        setSubscriptionLoading(false);
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
-  }, [fetchRole]);
+    return () => authSub.unsubscribe();
+  }, [fetchRole, fetchSubscription]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -113,6 +154,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchRole]);
 
+  const refreshSubscription = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      await fetchSubscription(session.access_token);
+    }
+  }, [fetchSubscription]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -120,11 +170,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         role,
         isAdmin: role === "admin",
+        subscription,
+        subscriptionLoading,
         signIn,
         signUp,
         signOut: signOutUser,
         getIdToken,
         refreshRole,
+        refreshSubscription,
       }}
     >
       {children}

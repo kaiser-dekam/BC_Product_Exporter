@@ -55,6 +55,12 @@ export default function ProductLibraryPage() {
   // How many products to show (for "Show More" in filtered results)
   const [visibleCount, setVisibleCount] = useState(50);
 
+  // Price lists
+  const [priceLists, setPriceLists] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedPriceListId, setSelectedPriceListId] = useState<string>("");
+  const [priceMap, setPriceMap] = useState<Record<string, number>>({});
+  const [priceListName, setPriceListName] = useState<string>("");
+
   // Load ALL products once using cursor pagination (one-time cost)
   const fetchAllProducts = useCallback(async () => {
     setLoading(true);
@@ -123,6 +129,50 @@ export default function ProductLibraryPage() {
     fetchAllProducts();
     fetchSyncStatus();
   }, [fetchAllProducts, fetchSyncStatus]);
+
+  // Load price lists on mount
+  useEffect(() => {
+    async function loadPriceLists() {
+      try {
+        const token = await getIdToken();
+        if (!token) return;
+        const res = await fetch("/api/price-lists", { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const data = await res.json();
+          setPriceLists(data.price_lists || []);
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+    loadPriceLists();
+  }, [getIdToken]);
+
+  // Fetch price map when selected price list changes
+  useEffect(() => {
+    if (!selectedPriceListId) {
+      setPriceMap({});
+      setPriceListName("");
+      return;
+    }
+    async function loadPriceMap() {
+      try {
+        const token = await getIdToken();
+        if (!token) return;
+        const res = await fetch(`/api/price-lists/${selectedPriceListId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPriceMap(data.price_map || {});
+          setPriceListName(data.name || "");
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+    loadPriceMap();
+  }, [selectedPriceListId, getIdToken]);
 
   // Client-side search filtering (no API calls)
   const filteredProducts = useMemo(() => {
@@ -293,13 +343,27 @@ export default function ProductLibraryPage() {
         onClearSelection={() => setSelectedIds([])}
       />
 
-      {/* Search */}
-      <div className="mb-6">
-        <Input
-          placeholder="Search products by name or SKU..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      {/* Search + Price List selector */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <div className="flex-1">
+          <Input
+            placeholder="Search products by name or SKU..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        {priceLists.length > 0 && (
+          <select
+            value={selectedPriceListId}
+            onChange={(e) => setSelectedPriceListId(e.target.value)}
+            className="bg-panel border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 min-w-[180px]"
+          >
+            <option value="">No price list</option>
+            {priceLists.map((pl) => (
+              <option key={pl.id} value={pl.id}>{pl.name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Stats bar */}
@@ -354,6 +418,8 @@ export default function ProductLibraryPage() {
                 selected={selectedIds.includes(product.id)}
                 onSelect={handleSelect}
                 onClick={() => handleProductClick(product)}
+                priceListPrice={selectedPriceListId && product.sku ? (priceMap[product.sku] ?? null) : null}
+                priceListName={priceListName}
               />
             ))}
           </div>

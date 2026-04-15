@@ -20,9 +20,11 @@ interface ProductCardProps {
   selected?: boolean;
   onSelect?: (id: string) => void;
   onClick?: () => void;
+  priceListPrice?: number | null;
+  priceListName?: string;
 }
 
-export default function ProductCard({ product, selected, onSelect, onClick }: ProductCardProps) {
+export default function ProductCard({ product, selected, onSelect, onClick, priceListPrice, priceListName }: ProductCardProps) {
   const hasImage = !!product.primary_image_url;
   const hasSummary = !!product.claude_summary;
 
@@ -80,13 +82,18 @@ export default function ProductCard({ product, selected, onSelect, onClick }: Pr
           <p className="text-xs text-muted">{product.brand_name}</p>
         )}
 
-        <div className="flex items-center gap-2 mt-auto">
+        <div className="flex items-center gap-2 mt-auto flex-wrap">
           <span className="text-base font-bold text-accent">
             ${product.price.toFixed(2)}
           </span>
           {product.sale_price > 0 && product.sale_price < product.price && (
             <span className="text-xs text-danger line-through">
               ${product.sale_price.toFixed(2)}
+            </span>
+          )}
+          {priceListPrice != null && (
+            <span className="text-xs font-medium text-warning" title={priceListName ? `${priceListName} price` : "Price list price"}>
+              {priceListName ? `${priceListName}: ` : "List: "}${priceListPrice.toFixed(2)}
             </span>
           )}
         </div>
