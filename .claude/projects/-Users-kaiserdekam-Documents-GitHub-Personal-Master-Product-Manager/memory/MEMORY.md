@@ -1,0 +1,2 @@
+- [BigCSV.co Product Overview](project_bigcsv.md) — BigCommerce product management SaaS: CSV, sales books, pricing, AI, snapshots
+- [Marketing Plan Created](project_marketing_phase.md) — First 100 customers plan created 2026-04-02, needs landing page + pricing + trial

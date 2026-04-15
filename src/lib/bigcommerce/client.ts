@@ -4,6 +4,8 @@ import type {
   BigCommerceVariant,
   BigCommerceBrand,
   BigCommerceCategory,
+  BigCommercePriceList,
+  BigCommercePriceListRecord,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -311,4 +313,103 @@ export async function fetchCategoryMap(
     map[cat.id] = cat.name;
   }
   return map;
+}
+
+// ---------------------------------------------------------------------------
+// Price Lists
+// ---------------------------------------------------------------------------
+
+export async function fetchPriceLists(
+  config: BigCommerceConfig,
+  pageSize = 250,
+): Promise<BigCommercePriceList[]> {
+  const endpoint = `${baseUrl(config)}/pricelists`;
+  const headers = buildHeaders(config);
+  const allLists: BigCommercePriceList[] = [];
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce Price Lists API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: BigCommercePriceList[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allLists.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allLists;
+}
+
+export async function fetchPriceListRecords(
+  priceListId: number,
+  config: BigCommerceConfig,
+  options: { currency?: string; pageSize?: number } = {},
+): Promise<BigCommercePriceListRecord[]> {
+  const pageSize = options.pageSize ?? 250;
+  const endpoint = `${baseUrl(config)}/pricelists/${priceListId}/records`;
+  const headers = buildHeaders(config);
+  const allRecords: BigCommercePriceListRecord[] = [];
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+    if (options.currency) params.set("currency_code", options.currency);
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce Price List Records API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: BigCommercePriceListRecord[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allRecords.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allRecords;
 }
