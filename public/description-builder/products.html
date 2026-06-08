@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product Library — Product Description Builder</title>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/products.css">
+</head>
+<body>
+
+<header class="top-bar">
+  <h1>Product Description Builder</h1>
+  <nav class="top-nav">
+    <a href="index.html" class="nav-link">Builder</a>
+    <a href="templates.html" class="nav-link">Templates</a>
+    <a href="products.html" class="nav-link active">Products</a>
+  </nav>
+  <div class="store-switcher">
+    <label for="store-select">Store:</label>
+    <select id="store-select" class="store-select"></select>
+  </div>
+</header>
+
+<main class="products-page">
+  <!-- Search & Controls -->
+  <div class="products-toolbar">
+    <div class="products-search-wrap">
+      <input type="text" id="library-search" class="products-search" placeholder="Search by name or SKU..." autocomplete="off">
+      <button id="btn-search" class="btn btn-primary btn-sm">Search</button>
+    </div>
+    <div class="products-info">
+      <label class="visibility-toggle">
+        <input type="checkbox" id="chk-hide-hidden">
+        <span>Hide products not on storefront</span>
+      </label>
+      <span id="products-count"></span>
+      <button id="btn-sync" class="btn btn-secondary btn-sm">Sync Products</button>
+      <button id="btn-csv-preview" class="btn btn-secondary btn-sm" title="Load descriptions from a locally generated CSV for preview — nothing is published to BigCommerce">
+        📄 Preview CSV
+      </button>
+    </div>
+  </div>
+
+  <!-- CSV Preview banner (shown when in CSV mode) -->
+  <div id="csv-preview-banner" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 16px;margin:0 0 12px;font-size:.875rem;color:#713f12;display:flex;align-items:center;gap:12px;">
+    <span>📄 <strong>CSV Preview mode</strong> — showing <span id="csv-source-name"></span>. Descriptions are <strong>not</strong> published to BigCommerce. Use <em>Edit</em> to open in the builder and review.</span>
+    <button id="btn-exit-csv" class="btn btn-secondary btn-xs" style="margin-left:auto;white-space:nowrap;">Exit Preview</button>
+  </div>
+
+  <!-- Product Table -->
+  <div class="products-table-wrap">
+    <table class="products-table" id="products-table">
+      <thead>
+        <tr>
+          <th class="col-name">Product Name</th>
+          <th class="col-sku">SKU</th>
+          <th class="col-visible">Status</th>
+          <th class="col-desc">Description</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="products-tbody">
+        <tr class="empty-row"><td colspan="5">Click <strong>Sync Products</strong> to load your BigCommerce catalog.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div class="products-pagination" id="pagination"></div>
+</main>
+
+<!-- Description Preview Modal -->
+<div id="desc-modal" class="desc-modal hidden">
+  <div class="desc-modal-backdrop"></div>
+  <div class="desc-modal-content">
+    <div class="desc-modal-header">
+      <div>
+        <h3 id="modal-product-name">Product</h3>
+        <span id="modal-product-sku" class="modal-sku"></span>
+      </div>
+      <div class="desc-modal-actions">
+        <button id="btn-edit-in-builder" class="btn btn-primary btn-sm">Edit in Builder</button>
+        <button id="btn-close-modal" class="btn btn-secondary btn-sm">Close</button>
+      </div>
+    </div>
+    <div class="desc-modal-body">
+      <div class="desc-tabs">
+        <button class="desc-tab active" data-tab="rendered">Rendered</button>
+        <button class="desc-tab" data-tab="html">HTML Source</button>
+      </div>
+      <div class="desc-tab-content" id="tab-rendered">
+        <iframe id="desc-preview-iframe" sandbox="allow-same-origin"></iframe>
+      </div>
+      <div class="desc-tab-content hidden" id="tab-html">
+        <pre id="desc-html-source"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/api-client.js"></script>
+<script src="js/store-switcher.js"></script>
+<script>
+(function() {
+  const searchInput = document.getElementById('library-search');
+  const btnSearch = document.getElementById('btn-search');
+  const btnSync = document.getElementById('btn-sync');
+  const tbody = document.getElementById('products-tbody');
+  const countEl = document.getElementById('products-count');
+  const paginationEl = document.getElementById('pagination');
+
+  // Modal elements
+  const modal = document.getElementById('desc-modal');
+  const modalName = document.getElementById('modal-product-name');
+  const modalSku = document.getElementById('modal-product-sku');
+  const modalIframe = document.getElementById('desc-preview-iframe');
+  const htmlSource = document.getElementById('desc-html-source');
+  const btnClose = document.getElementById('btn-close-modal');
+  const btnEdit = document.getElementById('btn-edit-in-builder');
+  const backdrop = modal.querySelector('.desc-modal-backdrop');
+  const tabs = modal.querySelectorAll('.desc-tab');
+  const tabRendered = document.getElementById('tab-rendered');
+  const tabHtml = document.getElementById('tab-html');
+
+  let products = [];
+  let drafts = {}; // productId -> { description, updatedAt, ... }
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalProducts = 0;
+  let activeProduct = null;
+  let hideNotVisible = false;
+  let csvPreviewMode = false;
+
+  // ====== CSV Preview Mode ======
+  const btnCsvPreview = document.getElementById('btn-csv-preview');
+  const btnExitCsv    = document.getElementById('btn-exit-csv');
+  const csvBanner     = document.getElementById('csv-preview-banner');
+  const csvSourceName = document.getElementById('csv-source-name');
+
+  btnCsvPreview.addEventListener('click', () => {
+    csvPreviewMode = true;
+    csvBanner.style.display = 'flex';
+    btnCsvPreview.style.display = 'none';
+    fetchProducts(1, searchInput.value.trim());
+  });
+
+  btnExitCsv.addEventListener('click', () => {
+    csvPreviewMode = false;
+    csvBanner.style.display = 'none';
+    btnCsvPreview.style.display = '';
+    fetchProducts(1, searchInput.value.trim());
+  });
+
+  const chkHideHidden = document.getElementById('chk-hide-hidden');
+  chkHideHidden.addEventListener('change', () => {
+    hideNotVisible = chkHideHidden.checked;
+    renderTable();
+  });
+
+  // ====== Fetch Products ======
+  async function fetchProducts(page, keyword) {
+    tbody.innerHTML = '<tr class="loading-row"><td colspan="5">Loading products...</td></tr>';
+    btnSync.disabled = true;
+    btnSync.textContent = 'Syncing...';
+
+    try {
+      let json;
+      if (csvPreviewMode) {
+        json = await API.getCsvPreview(keyword);
+        if (json.source) csvSourceName.textContent = json.source;
+      } else {
+        json = await API.getProductLibrary(page, 50, keyword || '');
+      }
+
+      products = json.data || [];
+      try {
+        const dr = await API.listDrafts();
+        drafts = (dr && dr.data) || {};
+      } catch (e) { drafts = {}; }
+      const pg = json.pagination || {};
+      currentPage = pg.current_page || 1;
+      totalPages = pg.total_pages || 1;
+      totalProducts = pg.total || products.length;
+
+      renderTable();
+      renderPagination();
+      countEl.textContent = `${totalProducts} product${totalProducts !== 1 ? 's' : ''}`;
+    } catch (err) {
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="5" style="color:#ef4444;">Error: ${err.message}</td></tr>`;
+      countEl.textContent = '';
+    } finally {
+      btnSync.disabled = false;
+      btnSync.textContent = 'Sync Products';
+    }
+  }
+
+  // ====== Render Table ======
+  function renderTable() {
+    tbody.innerHTML = '';
+
+    const filtered = hideNotVisible ? products.filter(p => p.is_visible === true) : products;
+    const hiddenCount = products.length - filtered.length;
+
+    if (!filtered.length) {
+      const msg = hiddenCount > 0
+        ? `All ${products.length} products on this page are not visible on the storefront. Uncheck the filter to see them.`
+        : 'No products found.';
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="5">${msg}</td></tr>`;
+      return;
+    }
+
+    filtered.forEach(p => {
+      const tr = document.createElement('tr');
+      if (!p.is_visible) tr.classList.add('row-hidden-product');
+
+      // Name
+      const tdName = document.createElement('td');
+      tdName.className = 'col-name';
+      tdName.textContent = p.name;
+      tr.appendChild(tdName);
+
+      // SKU
+      const tdSku = document.createElement('td');
+      tdSku.className = 'col-sku';
+      tdSku.innerHTML = p.sku ? `<code>${escHTML(p.sku)}</code>` : '<span class="no-value">—</span>';
+      tr.appendChild(tdSku);
+
+      // Storefront Visibility
+      const tdVis = document.createElement('td');
+      tdVis.className = 'col-visible';
+      if (p.is_visible) {
+        tdVis.innerHTML = '<span class="vis-badge visible">On Storefront</span>';
+      } else {
+        tdVis.innerHTML = '<span class="vis-badge hidden-badge">Not Visible</span>';
+      }
+      tr.appendChild(tdVis);
+
+      // Description
+      const tdDesc = document.createElement('td');
+      tdDesc.className = 'col-desc';
+      if (p.description && p.description.trim()) {
+        const preview = p.description.replace(/<[^>]*>/g, '').trim();
+        const truncated = preview.length > 100 ? preview.substring(0, 100) + '...' : preview;
+        tdDesc.innerHTML = `<span class="desc-preview-text">${escHTML(truncated)}</span>`;
+        if (hasBuilderData(p.description)) {
+          tdDesc.innerHTML += ' <span class="desc-badge builder" title="Created with the description builder — click Edit to restore">Builder</span>';
+        } else if (p.description.includes('<')) {
+          tdDesc.innerHTML += ' <span class="desc-badge html">HTML</span>';
+        }
+      } else {
+        tdDesc.innerHTML = '<span class="desc-badge empty">No description</span>';
+      }
+      const draft = drafts[String(p.id)];
+      if (draft) {
+        const when = draft.updatedAt ? new Date(draft.updatedAt).toLocaleDateString() : '';
+        tdDesc.innerHTML += ` <span class="desc-badge draft" title="Unpublished draft saved ${when}">Draft</span>`;
+      }
+      tr.appendChild(tdDesc);
+
+      // Actions
+      const tdActions = document.createElement('td');
+      tdActions.className = 'col-actions';
+
+      const viewBtn = document.createElement('button');
+      viewBtn.className = 'btn btn-secondary btn-xs';
+      viewBtn.textContent = 'View';
+      viewBtn.onclick = () => openModal(p);
+      tdActions.appendChild(viewBtn);
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn btn-primary btn-xs';
+      editBtn.textContent = drafts[String(p.id)] ? 'Edit Draft' : 'Edit';
+      editBtn.onclick = () => editProduct(p);
+      tdActions.appendChild(editBtn);
+
+      if (drafts[String(p.id)]) {
+        const pubBtn = document.createElement('button');
+        pubBtn.className = 'btn btn-primary btn-xs';
+        pubBtn.textContent = 'Publish';
+        pubBtn.style.background = '#10b981';
+        pubBtn.style.borderColor = '#10b981';
+        pubBtn.onclick = async () => {
+          if (!confirm(`Publish draft for "${p.name}" to BigCommerce?`)) return;
+          pubBtn.disabled = true;
+          pubBtn.textContent = 'Publishing...';
+          try {
+            const r = await API.publishDraft(p.id);
+            if (r.ok) {
+              delete drafts[String(p.id)];
+              fetchProducts(currentPage, searchInput.value.trim());
+            } else {
+              const msg = (r.data && (r.data.title || r.data.error)) || r.error || 'Unknown error';
+              alert('Publish failed: ' + msg);
+              pubBtn.disabled = false;
+              pubBtn.textContent = 'Publish';
+            }
+          } catch (err) {
+            alert('Publish failed: ' + err.message);
+            pubBtn.disabled = false;
+            pubBtn.textContent = 'Publish';
+          }
+        };
+        tdActions.appendChild(pubBtn);
+
+        const discardBtn = document.createElement('button');
+        discardBtn.className = 'btn btn-secondary btn-xs';
+        discardBtn.textContent = 'Discard';
+        discardBtn.onclick = async () => {
+          if (!confirm(`Discard the draft for "${p.name}"?`)) return;
+          try {
+            await API.deleteDraft(p.id);
+            delete drafts[String(p.id)];
+            renderTable();
+          } catch (err) {
+            alert('Discard failed: ' + err.message);
+          }
+        };
+        tdActions.appendChild(discardBtn);
+      }
+
+      tr.appendChild(tdActions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ====== Pagination ======
+  function renderPagination() {
+    paginationEl.innerHTML = '';
+    if (totalPages <= 1) return;
+
+    const addBtn = (label, page, disabled, active) => {
+      const btn = document.createElement('button');
+      btn.className = 'pagination-btn' + (active ? ' active' : '');
+      btn.textContent = label;
+      btn.disabled = disabled;
+      btn.onclick = () => fetchProducts(page, searchInput.value.trim());
+      paginationEl.appendChild(btn);
+    };
+
+    addBtn('Prev', currentPage - 1, currentPage <= 1, false);
+
+    // Page numbers (show window of 5 around current)
+    let start = Math.max(1, currentPage - 2);
+    let end = Math.min(totalPages, start + 4);
+    if (end - start < 4) start = Math.max(1, end - 4);
+
+    if (start > 1) {
+      addBtn('1', 1, false, currentPage === 1);
+      if (start > 2) {
+        const dots = document.createElement('span');
+        dots.className = 'pagination-dots';
+        dots.textContent = '...';
+        paginationEl.appendChild(dots);
+      }
+    }
+
+    for (let i = start; i <= end; i++) {
+      addBtn(String(i), i, false, currentPage === i);
+    }
+
+    if (end < totalPages) {
+      if (end < totalPages - 1) {
+        const dots = document.createElement('span');
+        dots.className = 'pagination-dots';
+        dots.textContent = '...';
+        paginationEl.appendChild(dots);
+      }
+      addBtn(String(totalPages), totalPages, false, currentPage === totalPages);
+    }
+
+    addBtn('Next', currentPage + 1, currentPage >= totalPages, false);
+  }
+
+  // ====== Modal ======
+  function openModal(product) {
+    activeProduct = product;
+    modalName.textContent = product.name;
+    modalSku.textContent = product.sku ? `SKU: ${product.sku}` : '';
+
+    // Rendered tab
+    const desc = product.description || '<p style="color:#9ca3af;text-align:center;padding:40px;">No description set.</p>';
+    modalIframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px;background:#f9fafb;font-family:system-ui,-apple-system,sans-serif;font-size:15px;color:#333;}</style></head><body>${desc}</body></html>`;
+
+    // HTML source tab
+    htmlSource.textContent = product.description || '(empty)';
+
+    // Reset to rendered tab
+    setTab('rendered');
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+    activeProduct = null;
+  }
+
+  function setTab(tab) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    tabRendered.classList.toggle('hidden', tab !== 'rendered');
+    tabHtml.classList.toggle('hidden', tab !== 'html');
+  }
+
+  tabs.forEach(t => t.onclick = () => setTab(t.dataset.tab));
+  btnClose.onclick = closeModal;
+  backdrop.onclick = closeModal;
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  // ====== Edit in Builder ======
+  btnEdit.onclick = () => {
+    if (activeProduct) editProduct(activeProduct);
+  };
+
+  function editProduct(product) {
+    // Store product info + description so the builder can detect & restore state
+    sessionStorage.setItem('edit-product', JSON.stringify({
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      description: product.description || ''
+    }));
+    window.location.href = 'index.html';
+  }
+
+  // ====== Search ======
+  btnSearch.onclick = () => fetchProducts(1, searchInput.value.trim());
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') fetchProducts(1, searchInput.value.trim());
+  });
+
+  // ====== Sync ======
+  btnSync.onclick = () => fetchProducts(1, searchInput.value.trim());
+
+  // ====== Helpers ======
+  function escHTML(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+  function hasBuilderData(desc) { return desc && desc.indexOf('[MODULAR-DESC-BUILDER-DATA]') !== -1; }
+})();
+</script>
+</body>
+</html>

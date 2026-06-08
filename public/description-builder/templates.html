@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Templates — Product Description Builder</title>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/templates.css">
+</head>
+<body>
+
+<header class="top-bar">
+  <h1>Product Description Builder</h1>
+  <nav class="top-nav">
+    <a href="index.html" class="nav-link">Builder</a>
+    <a href="templates.html" class="nav-link active">Templates</a>
+    <a href="products.html" class="nav-link">Products</a>
+  </nav>
+  <div class="store-switcher">
+    <label for="store-select">Store:</label>
+    <select id="store-select" class="store-select"></select>
+  </div>
+</header>
+
+<main class="templates-page">
+  <div class="templates-hero">
+    <h2>Start with a Template</h2>
+    <p>Choose a pre-built layout designed for ecommerce product listings. Each template is fully customizable once loaded into the builder.</p>
+  </div>
+
+  <div class="templates-grid" id="templates-grid">
+    <!-- populated by JS -->
+  </div>
+</main>
+
+<!-- Full-width HTML preview modal -->
+<div id="template-preview-modal" class="template-preview-modal hidden">
+  <div class="template-preview-backdrop"></div>
+  <div class="template-preview-content">
+    <div class="template-preview-header">
+      <h3 id="preview-modal-title">Preview</h3>
+      <div class="template-preview-actions">
+        <button id="btn-use-template" class="btn btn-primary">Use This Template</button>
+        <button id="btn-close-modal" class="btn btn-secondary">Close</button>
+      </div>
+    </div>
+    <iframe id="preview-modal-iframe" sandbox="allow-same-origin"></iframe>
+  </div>
+</div>
+
+<script src="js/api-client.js"></script>
+<script src="js/store-switcher.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/theme-renderers.js"></script>
+<script src="js/design-settings.js"></script>
+<script src="js/html-generator.js"></script>
+<script src="js/templates.js"></script>
+<script>
+(function() {
+  const grid = document.getElementById('templates-grid');
+  const modal = document.getElementById('template-preview-modal');
+  const modalTitle = document.getElementById('preview-modal-title');
+  const modalIframe = document.getElementById('preview-modal-iframe');
+  const btnUse = document.getElementById('btn-use-template');
+  const btnClose = document.getElementById('btn-close-modal');
+  const backdrop = modal.querySelector('.template-preview-backdrop');
+
+  let activeTemplate = null;
+
+  // Block-type icon map for layout visualization
+  const blockIcons = {
+    header: { icon: 'H', color: '#6366f1' },
+    text: { icon: 'T', color: '#64748b' },
+    image: { icon: 'IMG', color: '#f59e0b' },
+    video: { icon: 'VID', color: '#ef4444' },
+    features: { icon: 'FEAT', color: '#10b981' },
+    comparison: { icon: 'CMP', color: '#f59e0b' },
+    specs: { icon: 'SPEC', color: '#14b8a6' },
+    models: { icon: 'OPT', color: '#8b5cf6' },
+    divider: { icon: '—', color: '#d1d5db' },
+    cta: { icon: 'CTA', color: '#00bf00' },
+    twocol: { icon: '2 COL', color: '#6366f1' },
+    threecol: { icon: '3 COL', color: '#6366f1' }
+  };
+
+  // Render template cards
+  TemplatePresets.forEach(template => {
+    const card = document.createElement('div');
+    card.className = 'template-card';
+
+    // Mini layout preview
+    const preview = document.createElement('div');
+    preview.className = 'template-mini-preview';
+    preview.style.borderTopColor = template.preview.accent;
+
+    template.preview.layout.forEach(type => {
+      const row = document.createElement('div');
+      row.className = 'mini-block';
+      const info = blockIcons[type] || { icon: '?', color: '#9ca3af' };
+      row.style.borderLeftColor = info.color;
+      row.innerHTML = `<span class="mini-block-icon" style="background:${info.color}15;color:${info.color};">${info.icon}</span>`;
+      preview.appendChild(row);
+    });
+    card.appendChild(preview);
+
+    // Info
+    const info = document.createElement('div');
+    info.className = 'template-info';
+    info.innerHTML = `
+      <h3 class="template-name">${template.name}</h3>
+      <p class="template-desc">${template.description}</p>
+      <div class="template-meta">
+        <span class="template-block-count">${template.blocks.length} blocks</span>
+        <span class="template-types">${[...new Set(template.blocks.map(b => b.type))].map(t => blockIcons[t]?.icon || t).join(' · ')}</span>
+      </div>
+    `;
+    card.appendChild(info);
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'template-actions';
+
+    const previewBtn = document.createElement('button');
+    previewBtn.className = 'btn btn-secondary';
+    previewBtn.textContent = 'Preview';
+    previewBtn.onclick = () => openPreview(template);
+
+    const useBtn = document.createElement('button');
+    useBtn.className = 'btn btn-primary';
+    useBtn.textContent = 'Use Template';
+    useBtn.onclick = () => useTemplate(template);
+
+    actions.appendChild(previewBtn);
+    actions.appendChild(useBtn);
+    card.appendChild(actions);
+
+    grid.appendChild(card);
+  });
+
+  // Preview modal
+  function openPreview(template) {
+    activeTemplate = template;
+    modalTitle.textContent = template.name;
+
+    const html = HTMLGenerator.generate(template.blocks);
+    modalIframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:24px 16px;background:#f9fafb;font-family:system-ui,-apple-system,sans-serif;}</style></head><body>${html}</body></html>`;
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closePreview() {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+    activeTemplate = null;
+  }
+
+  btnClose.onclick = closePreview;
+  backdrop.onclick = closePreview;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePreview();
+  });
+
+  btnUse.onclick = () => {
+    if (activeTemplate) useTemplate(activeTemplate);
+  };
+
+  // Load template into builder
+  function useTemplate(template) {
+    // Deep clone and give each block fresh IDs
+    const blocks = JSON.parse(JSON.stringify(template.blocks));
+    assignFreshIds(blocks);
+
+    // Store in sessionStorage and redirect to builder
+    sessionStorage.setItem('pending-template', JSON.stringify(blocks));
+    window.location.href = 'index.html';
+  }
+
+  function assignFreshIds(blocks) {
+    blocks.forEach(b => {
+      b.id = '_' + Math.random().toString(36).substr(2, 9);
+      // Handle nested blocks in column layouts
+      if (b.data) {
+        ['left', 'right', 'col1', 'col2', 'col3'].forEach(key => {
+          if (Array.isArray(b.data[key])) {
+            assignFreshIds(b.data[key]);
+          }
+        });
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

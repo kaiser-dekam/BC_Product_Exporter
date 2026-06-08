@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product Description Builder</title>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/design-panel.css">
+<link rel="stylesheet" href="css/product-picker.css">
+</head>
+<body>
+
+<header class="top-bar">
+  <h1>Product Description Builder</h1>
+  <nav class="top-nav">
+    <a href="index.html" class="nav-link active">Builder</a>
+    <a href="templates.html" class="nav-link">Templates</a>
+    <a href="products.html" class="nav-link">Products</a>
+  </nav>
+  <div class="store-switcher">
+    <label for="store-select">Store:</label>
+    <select id="store-select" class="store-select"></select>
+  </div>
+  <div class="product-selector">
+    <input type="text" id="product-search" placeholder="Search products..." autocomplete="off">
+    <div id="product-dropdown" class="dropdown hidden"></div>
+    <span id="selected-product" class="selected-product"></span>
+  </div>
+</header>
+
+<div class="action-bar">
+  <button id="btn-design" class="btn btn-secondary btn-design-toggle"><span class="design-icon">&#9998;</span> Design</button>
+  <button id="btn-preview" class="btn btn-secondary">Preview</button>
+  <button id="btn-copy" class="btn btn-secondary">Copy HTML</button>
+  <button id="btn-save-draft" class="btn btn-secondary" disabled>Save Draft</button>
+  <button id="btn-save" class="btn btn-primary" disabled>Save to BigCommerce</button>
+</div>
+
+<div id="draft-banner" class="draft-banner hidden">
+  <span id="draft-banner-text">Editing draft</span>
+  <button id="btn-publish-draft" class="btn btn-primary btn-sm">Publish Draft</button>
+  <button id="btn-discard-draft" class="btn btn-secondary btn-sm">Discard Draft</button>
+</div>
+
+<main class="workspace">
+  <aside class="toolbar" id="toolbar"></aside>
+  <div class="canvas-area">
+    <div id="current-desc-panel" class="current-desc-panel hidden">
+      <button id="current-desc-toggle" class="current-desc-toggle">
+        <span class="current-desc-toggle-icon">&#9660;</span>
+        Current Product Description
+      </button>
+      <div id="current-desc-body" class="current-desc-body">
+        <iframe id="current-desc-iframe" sandbox="allow-same-origin"></iframe>
+      </div>
+    </div>
+    <div id="canvas" class="canvas">
+      <div class="canvas-placeholder">Drag blocks from the toolbar to start building</div>
+    </div>
+  </div>
+  <aside class="design-sidebar" id="design-sidebar"></aside>
+</main>
+
+
+<div id="preview-panel" class="preview-panel hidden">
+  <div class="preview-header">
+    <span>HTML Preview</span>
+    <button id="btn-close-preview" class="btn-close">&times;</button>
+  </div>
+  <iframe id="preview-iframe" sandbox="allow-same-origin"></iframe>
+</div>
+
+<script src="js/api-client.js"></script>
+<script src="js/store-switcher.js"></script>
+<script src="js/product-picker.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/toolbar.js"></script>
+<script src="js/custom-blocks.js"></script>
+<script src="js/canvas.js"></script>
+<script src="js/theme-renderers.js"></script>
+<script src="js/theme-colors.js"></script>
+<script src="js/design-settings.js"></script>
+<script src="js/html-generator.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

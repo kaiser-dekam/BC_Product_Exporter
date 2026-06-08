@@ -266,3 +266,30 @@ CREATE POLICY snapshot_items_insert ON product_snapshot_items
   FOR INSERT WITH CHECK (EXISTS (
     SELECT 1 FROM product_snapshots ps WHERE ps.id = snapshot_id AND ps.user_id = auth.uid()
   ));
+
+-- ============================================================================
+-- 11. description_drafts (Modular Description Builder drafts)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS description_drafts (
+  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  product_id  TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  name        TEXT NOT NULL DEFAULT '',
+  sku         TEXT NOT NULL DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_description_drafts_user
+  ON description_drafts (user_id, updated_at DESC);
+
+ALTER TABLE description_drafts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY description_drafts_select ON description_drafts
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY description_drafts_insert ON description_drafts
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY description_drafts_update ON description_drafts
+  FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY description_drafts_delete ON description_drafts
+  FOR DELETE USING (auth.uid() = user_id);
