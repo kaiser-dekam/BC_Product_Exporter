@@ -71,6 +71,31 @@ export interface BigCommerceVariant {
   option_values?: Array<{ label: string; option_display_name: string }>;
 }
 
+export interface BigCommerceLocation {
+  id: number;
+  code: string;
+  label: string;
+  enabled: boolean;
+  type_id?: string;
+}
+
+export interface BigCommerceInventoryLocationLevel {
+  location_id: number;
+  available_to_sell?: number;
+  total_inventory_onhand?: number;
+  warning_level?: number;
+  is_in_stock?: boolean;
+}
+
+export interface BigCommerceInventoryItem {
+  identity: {
+    sku: string;
+    variant_id?: number;
+    product_id?: number;
+  };
+  locations: BigCommerceInventoryLocationLevel[];
+}
+
 export interface BigCommerceBrand {
   id: number;
   name: string;

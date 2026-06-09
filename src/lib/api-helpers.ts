@@ -1,8 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken, extractBearerToken } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/server";
-import { decrypt } from "@/lib/crypto";
+import { decrypt, encrypt } from "@/lib/crypto";
 import type { BigCommerceConfig } from "@/lib/bigcommerce/types";
+
+/**
+ * Shape of an encrypted BigCommerce credentials blob (per-field AES-GCM).
+ * Used both by the profile and by additional inventory store sources.
+ */
+export interface EncryptedBigCommerceCredentials {
+  store_hash_encrypted: string;
+  store_hash_iv: string;
+  store_hash_authTag: string;
+  client_id_encrypted: string;
+  client_id_iv: string;
+  client_id_authTag: string;
+  access_token_encrypted: string;
+  access_token_iv: string;
+  access_token_authTag: string;
+}
+
+/**
+ * Encrypts a BigCommerce config into the stored per-field blob shape.
+ */
+export function encryptBigCommerceCredentials(
+  config: BigCommerceConfig
+): EncryptedBigCommerceCredentials {
+  const storeHash = encrypt(config.store_hash);
+  const clientId = encrypt(config.client_id);
+  const accessToken = encrypt(config.access_token);
+
+  return {
+    store_hash_encrypted: storeHash.ciphertext,
+    store_hash_iv: storeHash.iv,
+    store_hash_authTag: storeHash.authTag,
+    client_id_encrypted: clientId.ciphertext,
+    client_id_iv: clientId.iv,
+    client_id_authTag: clientId.authTag,
+    access_token_encrypted: accessToken.ciphertext,
+    access_token_iv: accessToken.iv,
+    access_token_authTag: accessToken.authTag,
+  };
+}
+
+/**
+ * Decrypts a stored credentials blob into a usable config. Falls back to the
+ * legacy shared `iv`/`authTag` fields when per-field ones are absent. Throws
+ * if the blob can't be decrypted.
+ */
+export function decryptBigCommerceCredentials(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  creds: any
+): BigCommerceConfig {
+  return {
+    store_hash: decrypt({
+      ciphertext: creds.store_hash_encrypted,
+      iv: creds.store_hash_iv || creds.iv,
+      authTag: creds.store_hash_authTag || creds.authTag,
+    }),
+    client_id: decrypt({
+      ciphertext: creds.client_id_encrypted,
+      iv: creds.client_id_iv || creds.iv,
+      authTag: creds.client_id_authTag || creds.authTag,
+    }),
+    access_token: decrypt({
+      ciphertext: creds.access_token_encrypted,
+      iv: creds.access_token_iv || creds.iv,
+      authTag: creds.access_token_authTag || creds.authTag,
+    }),
+  };
+}
 
 /**
  * Authenticate a request by extracting and verifying the Bearer token.
@@ -69,23 +136,7 @@ export async function loadCredentialsFromProfile(
   }
 
   try {
-    const store_hash = decrypt({
-      ciphertext: creds.store_hash_encrypted,
-      iv: creds.store_hash_iv || creds.iv,
-      authTag: creds.store_hash_authTag || creds.authTag,
-    });
-    const client_id = decrypt({
-      ciphertext: creds.client_id_encrypted,
-      iv: creds.client_id_iv || creds.iv,
-      authTag: creds.client_id_authTag || creds.authTag,
-    });
-    const access_token = decrypt({
-      ciphertext: creds.access_token_encrypted,
-      iv: creds.access_token_iv || creds.iv,
-      authTag: creds.access_token_authTag || creds.authTag,
-    });
-
-    return { config: { store_hash, client_id, access_token } };
+    return { config: decryptBigCommerceCredentials(creds) };
   } catch {
     return {
       error: NextResponse.json(

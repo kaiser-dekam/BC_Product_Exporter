@@ -4,6 +4,8 @@ import type {
   BigCommerceVariant,
   BigCommerceBrand,
   BigCommerceCategory,
+  BigCommerceLocation,
+  BigCommerceInventoryItem,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -311,4 +313,237 @@ export async function fetchCategoryMap(
     map[cat.id] = cat.name;
   }
   return map;
+}
+
+// ---------------------------------------------------------------------------
+// Inventory locations (Multi-Location Inventory API)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches all inventory locations configured in BigCommerce.
+ */
+export async function fetchInventoryLocations(
+  config: BigCommerceConfig,
+  pageSize = 250,
+): Promise<BigCommerceLocation[]> {
+  const endpoint = `${baseUrl(config)}/inventory/locations`;
+  const headers = buildHeaders(config);
+
+  const allLocations: BigCommerceLocation[] = [];
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: BigCommerceLocation[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allLocations.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allLocations;
+}
+
+/**
+ * Fetches a map of product_id -> inventory_tracking ("none" | "product" |
+ * "variant") from the catalog. Uses include_fields to keep the payload tiny.
+ * Lets the inventory view tell which products actually have tracking enabled.
+ */
+export async function fetchInventoryTrackingMap(
+  config: BigCommerceConfig,
+  pageSize = 250,
+): Promise<Record<number, string>> {
+  const endpoint = `${baseUrl(config)}/catalog/products`;
+  const headers = buildHeaders(config);
+
+  const map: Record<number, string> = {};
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+      include_fields: "inventory_tracking",
+    });
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: Array<{ id: number; inventory_tracking?: string }> =
+      payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    for (const product of data) {
+      map[product.id] = product.inventory_tracking ?? "none";
+    }
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return map;
+}
+
+/**
+ * Fetches inventory items across all locations. Each item carries its
+ * identity (sku, product_id, variant_id) and a `locations` array with the
+ * available_to_sell / on-hand counts at each location.
+ */
+export async function fetchInventoryItems(
+  config: BigCommerceConfig,
+  options: { maxItems?: number; pageSize?: number } = {},
+): Promise<BigCommerceInventoryItem[]> {
+  const maxItems = options.maxItems ?? 10_000;
+  const pageSize = options.pageSize ?? 250;
+
+  const endpoint = `${baseUrl(config)}/inventory/items`;
+  const headers = buildHeaders(config);
+
+  const allItems: BigCommerceInventoryItem[] = [];
+  let page = 1;
+
+  while (allItems.length < maxItems) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: BigCommerceInventoryItem[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allItems.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allItems.slice(0, maxItems);
+}
+
+// ---------------------------------------------------------------------------
+// Price updates
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates a single product's price fields in BigCommerce.
+ * Returns an object with the result:
+ *   - error: null on success, string on failure
+ *   - notFound: true if the product ID returned 404 (stale cache)
+ */
+export async function updateProductPrice(
+  update: {
+    id: number;
+    price?: number;
+    sale_price?: number;
+    cost_price?: number;
+  },
+  config: BigCommerceConfig,
+): Promise<{ error: string | null; notFound: boolean }> {
+  const { id, ...fields } = update;
+  const endpoint = `${baseUrl(config)}/catalog/products/${id}`;
+  const headers = buildHeaders(config);
+
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(fields),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    return {
+      error: `BC product ${id}: ${response.status} ${text}`,
+      notFound: response.status === 404,
+    };
+  }
+
+  return { error: null, notFound: false };
+}
+
+/**
+ * Looks up a product in BigCommerce by SKU.
+ * Returns the BC product ID if found, or null if not found.
+ */
+export async function findProductIdBySku(
+  sku: string,
+  config: BigCommerceConfig,
+): Promise<number | null> {
+  if (!sku) return null;
+
+  const endpoint = `${baseUrl(config)}/catalog/products`;
+  const headers = buildHeaders(config);
+  const params = new URLSearchParams({ sku, limit: "1" });
+
+  const response = await fetch(`${endpoint}?${params.toString()}`, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) return null;
+
+  const payload = await response.json();
+  const data = payload.data ?? [];
+  return data.length > 0 ? (data[0].id as number) : null;
 }

@@ -268,7 +268,49 @@ CREATE POLICY snapshot_items_insert ON product_snapshot_items
   ));
 
 -- ============================================================================
--- 11. description_drafts (Modular Description Builder drafts)
+-- 11. product_tags (user-defined tags)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS product_tags (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  color      TEXT NOT NULL DEFAULT '#3b82f6',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_tags_user ON product_tags (user_id);
+
+ALTER TABLE product_tags ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY product_tags_select ON product_tags FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY product_tags_insert ON product_tags FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY product_tags_delete ON product_tags FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 12. product_tag_assignments (many-to-many: products ↔ tags)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS product_tag_assignments (
+  product_id  TEXT NOT NULL REFERENCES product_cache(id) ON DELETE CASCADE,
+  tag_id      UUID NOT NULL REFERENCES product_tags(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  PRIMARY KEY (product_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_assignments_user ON product_tag_assignments (user_id);
+CREATE INDEX IF NOT EXISTS idx_tag_assignments_tag  ON product_tag_assignments (tag_id);
+
+ALTER TABLE product_tag_assignments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY product_tag_assignments_select ON product_tag_assignments
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY product_tag_assignments_insert ON product_tag_assignments
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY product_tag_assignments_delete ON product_tag_assignments
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 13. description_drafts (Modular Description Builder drafts)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS description_drafts (
   user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -292,4 +334,73 @@ CREATE POLICY description_drafts_insert ON description_drafts
 CREATE POLICY description_drafts_update ON description_drafts
   FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY description_drafts_delete ON description_drafts
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 14. inventory_sheets (Google Sheets sources for inventory comparison)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS inventory_sheets (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  sheet_url    TEXT NOT NULL,
+  sku_column   TEXT NOT NULL DEFAULT 'SKU',
+  stock_column TEXT NOT NULL DEFAULT 'Available Stock',
+  sku_prefix   TEXT NOT NULL DEFAULT '',
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- For installs created before sku_prefix existed:
+ALTER TABLE inventory_sheets
+  ADD COLUMN IF NOT EXISTS sku_prefix TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_inventory_sheets_user
+  ON inventory_sheets (user_id, sort_order);
+
+ALTER TABLE inventory_sheets ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS inventory_sheets_select ON inventory_sheets;
+CREATE POLICY inventory_sheets_select ON inventory_sheets
+  FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS inventory_sheets_insert ON inventory_sheets;
+CREATE POLICY inventory_sheets_insert ON inventory_sheets
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS inventory_sheets_update ON inventory_sheets;
+CREATE POLICY inventory_sheets_update ON inventory_sheets
+  FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS inventory_sheets_delete ON inventory_sheets;
+CREATE POLICY inventory_sheets_delete ON inventory_sheets
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 15. inventory_stores (additional BigCommerce stores for inventory comparison)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS inventory_stores (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  -- Encrypted BigCommerce credentials (same per-field shape as profiles)
+  credentials JSONB NOT NULL,
+  sku_prefix  TEXT NOT NULL DEFAULT '',
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_stores_user
+  ON inventory_stores (user_id, sort_order);
+
+ALTER TABLE inventory_stores ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS inventory_stores_select ON inventory_stores;
+CREATE POLICY inventory_stores_select ON inventory_stores
+  FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS inventory_stores_insert ON inventory_stores;
+CREATE POLICY inventory_stores_insert ON inventory_stores
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS inventory_stores_update ON inventory_stores;
+CREATE POLICY inventory_stores_update ON inventory_stores
+  FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS inventory_stores_delete ON inventory_stores;
+CREATE POLICY inventory_stores_delete ON inventory_stores
   FOR DELETE USING (auth.uid() = user_id);
