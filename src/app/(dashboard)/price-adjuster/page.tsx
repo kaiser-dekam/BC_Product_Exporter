@@ -8,6 +8,7 @@ import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import CategoryTreeSelect, { type CategoryNode } from "@/components/price-adjuster/CategoryTreeSelect";
 import BulkPriceControls from "@/components/price-adjuster/BulkPriceControls";
+import type { ProductTag } from "@/types";
 
 interface Product {
   id: string;
@@ -44,6 +45,11 @@ export default function PriceAdjusterPage() {
   // Category tree
   const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+
+  // Tags
+  const [allTags, setAllTags] = useState<ProductTag[]>([]);
+  const [tagAssignments, setTagAssignments] = useState<Record<string, string[]>>({});
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
 
   // Track edits as a map of product id -> changed fields
   const [edits, setEdits] = useState<Record<string, PriceEdits>>({});
@@ -108,8 +114,28 @@ export default function PriceAdjusterPage() {
     }
   }, [getIdToken]);
 
+  const fetchTags = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+      const res = await fetch("/api/tags", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAllTags(data.tags || []);
+      const map: Record<string, string[]> = {};
+      for (const a of data.assignments || []) {
+        if (!map[a.product_id]) map[a.product_id] = [];
+        map[a.product_id].push(a.tag_id);
+      }
+      setTagAssignments(map);
+    } catch {
+      // Non-critical
+    }
+  }, [getIdToken]);
+
   const initialLoad = useRef(false);
   const categoriesLoaded = useRef(false);
+  const tagsLoaded = useRef(false);
   useEffect(() => {
     if (initialLoad.current) return;
     initialLoad.current = true;
@@ -122,6 +148,12 @@ export default function PriceAdjusterPage() {
     fetchCategoryTree();
   }, [fetchCategoryTree]);
 
+  useEffect(() => {
+    if (tagsLoaded.current) return;
+    tagsLoaded.current = true;
+    fetchTags();
+  }, [fetchTags]);
+
   const filteredProducts = useMemo(() => {
     let result = allProducts;
 
@@ -129,6 +161,10 @@ export default function PriceAdjusterPage() {
       result = result.filter(
         (p) => p.category_names && p.category_names.includes(selectedCategory)
       );
+    }
+
+    if (activeTagFilter) {
+      result = result.filter((p) => (tagAssignments[p.id] || []).includes(activeTagFilter));
     }
 
     const term = search.trim().toLowerCase();
@@ -141,7 +177,7 @@ export default function PriceAdjusterPage() {
     }
 
     return result;
-  }, [allProducts, search, selectedCategory]);
+  }, [allProducts, search, selectedCategory, activeTagFilter, tagAssignments]);
 
   const hasEdits = Object.keys(edits).length > 0;
   const editCount = Object.keys(edits).length;
@@ -238,32 +274,46 @@ export default function PriceAdjusterPage() {
       const data = await res.json();
 
       if (data.errors?.length > 0) {
-        setError(`Updated ${data.updated} products, but ${data.errors.length} failed`);
+        const detail = data.errors.join("\n");
+        setError(
+          `Updated ${data.updated} product${data.updated !== 1 ? "s" : ""}, but ${data.errors.length} failed:\n${detail}`
+        );
       } else {
-        setSuccessMessage(`Successfully updated prices for ${data.updated} products`);
+        setSuccessMessage(`Successfully updated prices for ${data.updated} product${data.updated !== 1 ? "s" : ""}`);
         setTimeout(() => setSuccessMessage(null), 5000);
       }
 
-      // Apply edits to local state and clear edits
-      setAllProducts((prev) =>
-        prev.map((p) => {
-          const edit = edits[p.id];
-          if (!edit) return p;
-          return {
-            ...p,
-            price: edit.price ?? p.price,
-            sale_price: edit.sale_price ?? p.sale_price,
-            cost_price: edit.cost_price ?? p.cost_price,
-          };
-        })
-      );
-      setEdits({});
+      // Only apply edits to local state for products that succeeded in BigCommerce.
+      // The API returns the list of errors keyed by product name; we can't cheaply
+      // reverse-map names to IDs here, so we conservatively clear all edits and
+      // re-fetch if there were any errors.
+      if (data.errors?.length > 0 && data.updated > 0) {
+        // Partial success — reload products so local state matches BC
+        setEdits({});
+        fetchAllProducts();
+      } else if (!data.errors?.length) {
+        // Full success — apply locally without a refetch
+        setAllProducts((prev) =>
+          prev.map((p) => {
+            const edit = edits[p.id];
+            if (!edit) return p;
+            return {
+              ...p,
+              price: edit.price ?? p.price,
+              sale_price: edit.sale_price ?? p.sale_price,
+              cost_price: edit.cost_price ?? p.cost_price,
+            };
+          })
+        );
+        setEdits({});
+      }
+      // If all failed, leave edits intact so the user can retry
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save prices");
     } finally {
       setSaving(false);
     }
-  }, [hasEdits, edits, getIdToken]);
+  }, [hasEdits, edits, getIdToken, fetchAllProducts]);
 
   const handleDiscard = useCallback(() => {
     setEdits({});
@@ -298,7 +348,7 @@ export default function PriceAdjusterPage() {
   const handleBulkApply = useCallback(
     (options: {
       field: "price" | "sale_price" | "cost_price";
-      mode: "amount" | "percentage";
+      mode: "amount" | "percentage" | "percent_off_price";
       value: number;
       round: "none" | "up" | "down";
       roundTo: 1 | 5 | 10;
@@ -312,9 +362,12 @@ export default function PriceAdjusterPage() {
           const existing = next[product.id] || {};
           const currentValue =
             existing[options.field] ?? product[options.field];
+          const regularPrice = existing["price"] ?? product["price"];
 
           let newValue: number;
-          if (options.mode === "percentage") {
+          if (options.mode === "percent_off_price") {
+            newValue = regularPrice * (1 - options.value / 100);
+          } else if (options.mode === "percentage") {
             newValue = currentValue * (1 + options.value / 100);
           } else {
             newValue = currentValue + options.value;
@@ -380,7 +433,7 @@ export default function PriceAdjusterPage() {
       {/* Messages */}
       {error && (
         <Card className="mb-4 border-danger/30 bg-danger/5">
-          <p className="text-sm text-danger">{error}</p>
+          <p className="text-sm text-danger whitespace-pre-wrap">{error}</p>
         </Card>
       )}
       {successMessage && (
@@ -390,7 +443,7 @@ export default function PriceAdjusterPage() {
       )}
 
       {/* Search & Category Filter */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row gap-3 mb-3">
         <div className="flex-1">
           <Input
             placeholder="Search products by name or SKU..."
@@ -405,6 +458,35 @@ export default function PriceAdjusterPage() {
           loading={categoriesLoading}
         />
       </div>
+
+      {/* Tag filter row */}
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-5">
+          <span className="text-xs text-muted">Tags:</span>
+          {allTags.map((tag) => (
+            <button
+              key={tag.id}
+              onClick={() => setActiveTagFilter((prev) => (prev === tag.id ? null : tag.id))}
+              className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+              style={
+                activeTagFilter === tag.id
+                  ? { backgroundColor: tag.color, color: "#fff" }
+                  : { backgroundColor: `${tag.color}22`, color: tag.color, border: `1px solid ${tag.color}55` }
+              }
+            >
+              {tag.name}
+            </button>
+          ))}
+          {activeTagFilter && (
+            <button
+              onClick={() => setActiveTagFilter(null)}
+              className="text-xs text-muted hover:text-text transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Bulk Price Controls */}
       <div className="mb-4">
