@@ -2,6 +2,7 @@
 
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import type { ProductTag } from "@/types";
 
 interface ProductCardProps {
   product: {
@@ -17,12 +18,13 @@ interface ProductCardProps {
     availability: string;
     claude_summary: string | null;
   };
+  tags?: ProductTag[];
   selected?: boolean;
   onSelect?: (id: string) => void;
   onClick?: () => void;
 }
 
-export default function ProductCard({ product, selected, onSelect, onClick }: ProductCardProps) {
+export default function ProductCard({ product, tags, selected, onSelect, onClick }: ProductCardProps) {
   const hasImage = !!product.primary_image_url;
   const hasSummary = !!product.claude_summary;
 
@@ -106,6 +108,20 @@ export default function ProductCard({ product, selected, onSelect, onClick }: Pr
             <Badge variant="danger">Out of Stock</Badge>
           )}
         </div>
+
+        {tags && tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {tags.map((tag) => (
+              <span
+                key={tag.id}
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-medium text-white leading-none"
+                style={{ backgroundColor: tag.color }}
+              >
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </Card>
   );

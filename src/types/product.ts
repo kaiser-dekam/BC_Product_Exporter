@@ -1,3 +1,9 @@
+export interface ProductTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface ProductCache {
   id: string;
   user_id: string;

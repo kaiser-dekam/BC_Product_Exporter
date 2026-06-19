@@ -3,6 +3,8 @@
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
 import Spinner from "@/components/ui/Spinner";
+import TagSelector from "./TagSelector";
+import type { ProductTag } from "@/types";
 
 interface ProductDetailModalProps {
   product: {
@@ -28,9 +30,25 @@ interface ProductDetailModalProps {
   } | null;
   onClose: () => void;
   descriptionLoading?: boolean;
+  allTags?: ProductTag[];
+  productTags?: ProductTag[];
+  tagsSaving?: boolean;
+  onTagToggle?: (tagId: string, nowAssigned: boolean) => void;
+  onTagCreate?: (name: string, color: string) => Promise<void>;
+  onTagDelete?: (tagId: string) => void;
 }
 
-export default function ProductDetailModal({ product, onClose, descriptionLoading }: ProductDetailModalProps) {
+export default function ProductDetailModal({
+  product,
+  onClose,
+  descriptionLoading,
+  allTags = [],
+  productTags = [],
+  tagsSaving = false,
+  onTagToggle,
+  onTagCreate,
+  onTagDelete,
+}: ProductDetailModalProps) {
   if (!product) return null;
 
   return (
@@ -99,6 +117,21 @@ export default function ProductDetailModal({ product, onClose, descriptionLoadin
           </Badge>
           {product.claude_summary && <Badge variant="success">AI Summary</Badge>}
         </div>
+
+        {/* Tags */}
+        {onTagToggle && onTagCreate && onTagDelete && (
+          <div>
+            <h4 className="text-sm font-semibold text-muted mb-2">Tags</h4>
+            <TagSelector
+              allTags={allTags}
+              assignedTagIds={productTags.map((t) => t.id)}
+              saving={tagsSaving}
+              onToggle={onTagToggle}
+              onCreate={onTagCreate}
+              onDelete={onTagDelete}
+            />
+          </div>
+        )}
 
         {/* AI Summary */}
         {product.claude_summary && (

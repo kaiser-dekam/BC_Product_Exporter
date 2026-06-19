@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import Button from "@/components/ui/Button";
 
 type PriceField = "price" | "sale_price" | "cost_price";
-type AdjustMode = "amount" | "percentage";
+type AdjustMode = "amount" | "percentage" | "percent_off_price";
 type RoundDirection = "none" | "up" | "down";
 type RoundTo = 1 | 5 | 10;
 
@@ -37,6 +37,14 @@ export default function BulkPriceControls({
   const [value, setValue] = useState("");
   const [round, setRound] = useState<RoundDirection>("none");
   const [roundTo, setRoundTo] = useState<RoundTo>(1);
+
+  const handleModeChange = useCallback((newMode: AdjustMode) => {
+    setMode(newMode);
+    // "% off regular price" doesn't apply to price itself — switch to sale_price
+    if (newMode === "percent_off_price" && field === "price") {
+      setField("sale_price");
+    }
+  }, [field]);
 
   const handleApply = useCallback(() => {
     const numValue = parseFloat(value);
@@ -71,11 +79,13 @@ export default function BulkPriceControls({
             className={selectClass}
             disabled={disabled}
           >
-            {Object.entries(fieldLabels).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
+            {Object.entries(fieldLabels)
+              .filter(([key]) => mode !== "percent_off_price" || key !== "price")
+              .map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
           </select>
         </div>
 
@@ -84,30 +94,33 @@ export default function BulkPriceControls({
           <label className="text-xs text-muted">Adjust by</label>
           <select
             value={mode}
-            onChange={(e) => setMode(e.target.value as AdjustMode)}
+            onChange={(e) => handleModeChange(e.target.value as AdjustMode)}
             className={selectClass}
             disabled={disabled}
           >
             <option value="amount">$ Amount</option>
-            <option value="percentage">% Percentage</option>
+            <option value="percentage">% of current value</option>
+            <option value="percent_off_price">% off regular price</option>
           </select>
         </div>
 
         {/* Value input */}
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted">
-            Value {mode === "percentage" ? "(%)" : "($)"}
+            {mode === "percent_off_price" ? "% off" : mode === "percentage" ? "Value (%)" : "Value ($)"}
           </label>
           <div className="relative">
             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted text-xs">
-              {mode === "percentage" ? "%" : "$"}
+              {mode === "amount" ? "$" : "%"}
             </span>
             <input
               type="number"
-              step={mode === "percentage" ? "0.1" : "0.01"}
+              step={mode === "amount" ? "0.01" : "0.1"}
+              min={mode === "percent_off_price" ? "0" : undefined}
+              max={mode === "percent_off_price" ? "100" : undefined}
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder={mode === "percentage" ? "e.g. 10 or -5" : "e.g. 50 or -10"}
+              placeholder={mode === "percent_off_price" ? "e.g. 20" : mode === "percentage" ? "e.g. 10 or -5" : "e.g. 50 or -10"}
               disabled={disabled}
               className={`w-40 pl-6 pr-2 py-1.5 rounded-lg text-sm
                 bg-white/5 border border-border text-text
@@ -163,13 +176,23 @@ export default function BulkPriceControls({
 
       {value && parseFloat(value) !== 0 && selectedCount > 0 && (
         <p className="text-xs text-muted mt-2">
-          Will {parseFloat(value) > 0 ? "increase" : "decrease"}{" "}
-          <span className="text-text font-medium">{fieldLabels[field]}</span> by{" "}
-          <span className="text-text font-medium">
-            {mode === "percentage"
-              ? `${Math.abs(parseFloat(value))}%`
-              : `$${Math.abs(parseFloat(value)).toFixed(2)}`}
-          </span>
+          {mode === "percent_off_price" ? (
+            <>
+              Will set{" "}
+              <span className="text-text font-medium">{fieldLabels[field]}</span> to{" "}
+              <span className="text-text font-medium">{parseFloat(value)}% off</span> the regular price
+            </>
+          ) : (
+            <>
+              Will {parseFloat(value) > 0 ? "increase" : "decrease"}{" "}
+              <span className="text-text font-medium">{fieldLabels[field]}</span> by{" "}
+              <span className="text-text font-medium">
+                {mode === "percentage"
+                  ? `${Math.abs(parseFloat(value))}%`
+                  : `$${Math.abs(parseFloat(value)).toFixed(2)}`}
+              </span>
+            </>
+          )}
           {round !== "none" && (
             <>
               {" "}then round {round} to nearest{" "}
