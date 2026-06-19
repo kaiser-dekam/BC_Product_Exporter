@@ -404,3 +404,79 @@ CREATE POLICY inventory_stores_update ON inventory_stores
 DROP POLICY IF EXISTS inventory_stores_delete ON inventory_stores;
 CREATE POLICY inventory_stores_delete ON inventory_stores
   FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 16. price_lists (BigCommerce Price List metadata)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS price_lists (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id          UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  bigcommerce_id   INTEGER DEFAULT NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_lists_user ON price_lists (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_user_bc_id ON price_lists (user_id, bigcommerce_id) WHERE bigcommerce_id IS NOT NULL;
+
+ALTER TABLE price_lists ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY price_lists_select ON price_lists FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY price_lists_insert ON price_lists FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY price_lists_delete ON price_lists FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- 17. price_list_records (SKU → price mappings per price list)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS price_list_records (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  price_list_id   UUID NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
+  sku             TEXT NOT NULL,
+  price           NUMERIC(12,2) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_list_records_list_sku ON price_list_records (price_list_id, sku);
+
+ALTER TABLE price_list_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY price_list_records_select ON price_list_records FOR SELECT USING (
+  EXISTS (SELECT 1 FROM price_lists pl WHERE pl.id = price_list_id AND pl.user_id = auth.uid())
+);
+CREATE POLICY price_list_records_insert ON price_list_records FOR INSERT WITH CHECK (
+  EXISTS (SELECT 1 FROM price_lists pl WHERE pl.id = price_list_id AND pl.user_id = auth.uid())
+);
+CREATE POLICY price_list_records_delete ON price_list_records FOR DELETE USING (
+  EXISTS (SELECT 1 FROM price_lists pl WHERE pl.id = price_list_id AND pl.user_id = auth.uid())
+);
+
+-- ============================================================================
+-- 18. user_subscriptions (Stripe billing)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+  user_id                 UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+  stripe_customer_id      TEXT UNIQUE,
+  stripe_subscription_id  TEXT UNIQUE,
+  stripe_price_id         TEXT,
+  plan                    TEXT CHECK (plan IN ('monthly', 'yearly')),
+  status                  TEXT NOT NULL DEFAULT 'incomplete',
+  current_period_end      TIMESTAMPTZ,
+  trial_end               TIMESTAMPTZ,
+  cancel_at_period_end    BOOLEAN NOT NULL DEFAULT FALSE,
+  past_due_since          TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_customer ON user_subscriptions (stripe_customer_id);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_subscription ON user_subscriptions (stripe_subscription_id);
+
+ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY user_subscriptions_select_own ON user_subscriptions
+  FOR SELECT USING (user_id = auth.uid());
+
+-- Insert/update only via service role (webhook + checkout API). No client-side writes.
+
+INSERT INTO user_subscriptions (user_id, status, plan)
+SELECT id, 'grandfathered', NULL FROM profiles
+ON CONFLICT (user_id) DO NOTHING;

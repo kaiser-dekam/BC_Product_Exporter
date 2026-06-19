@@ -444,11 +444,14 @@ interface ProductItem {
   width?: number;
   height?: number;
   depth?: number;
+  price_list_price?: number | null;
+  price_list_label?: string;
   variants?: ProductVariant[];
   show_price?: boolean;
   show_sale_price?: boolean;
   show_cost_price?: boolean;
   show_variants?: boolean;
+  show_price_list?: boolean;
 }
 
 interface HeaderItem {
@@ -574,6 +577,7 @@ function buildPriceLines(product: ProductItem): Array<{ label: string; value: nu
   if (product.show_price ?? true) lines.push({ label: "", value: product.price });
   if ((product.show_sale_price ?? false) && product.sale_price != null) lines.push({ label: "Sale", value: product.sale_price });
   if ((product.show_cost_price ?? false) && product.cost_price != null) lines.push({ label: "Cost", value: product.cost_price });
+  if ((product.show_price_list ?? false) && product.price_list_price != null) lines.push({ label: product.price_list_label || "List", value: product.price_list_price });
   return lines;
 }
 

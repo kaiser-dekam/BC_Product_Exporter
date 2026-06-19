@@ -6,6 +6,8 @@ import type {
   BigCommerceCategory,
   BigCommerceLocation,
   BigCommerceInventoryItem,
+  BigCommercePriceList,
+  BigCommercePriceListRecord,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -319,9 +321,6 @@ export async function fetchCategoryMap(
 // Inventory locations (Multi-Location Inventory API)
 // ---------------------------------------------------------------------------
 
-/**
- * Fetches all inventory locations configured in BigCommerce.
- */
 export async function fetchInventoryLocations(
   config: BigCommerceConfig,
   pageSize = 250,
@@ -369,11 +368,6 @@ export async function fetchInventoryLocations(
   return allLocations;
 }
 
-/**
- * Fetches a map of product_id -> inventory_tracking ("none" | "product" |
- * "variant") from the catalog. Uses include_fields to keep the payload tiny.
- * Lets the inventory view tell which products actually have tracking enabled.
- */
 export async function fetchInventoryTrackingMap(
   config: BigCommerceConfig,
   pageSize = 250,
@@ -425,11 +419,6 @@ export async function fetchInventoryTrackingMap(
   return map;
 }
 
-/**
- * Fetches inventory items across all locations. Each item carries its
- * identity (sku, product_id, variant_id) and a `locations` array with the
- * available_to_sell / on-hand counts at each location.
- */
 export async function fetchInventoryItems(
   config: BigCommerceConfig,
   options: { maxItems?: number; pageSize?: number } = {},
@@ -481,15 +470,108 @@ export async function fetchInventoryItems(
 }
 
 // ---------------------------------------------------------------------------
+// Price Lists
+// ---------------------------------------------------------------------------
+
+export async function fetchPriceLists(
+  config: BigCommerceConfig,
+  pageSize = 250,
+): Promise<BigCommercePriceList[]> {
+  const endpoint = `${baseUrl(config)}/pricelists`;
+  const headers = buildHeaders(config);
+  const allLists: BigCommercePriceList[] = [];
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce Price Lists API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: BigCommercePriceList[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allLists.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allLists;
+}
+
+export async function fetchPriceListRecords(
+  priceListId: number,
+  config: BigCommerceConfig,
+  options: { currency?: string; pageSize?: number } = {},
+): Promise<BigCommercePriceListRecord[]> {
+  const pageSize = options.pageSize ?? 250;
+  const endpoint = `${baseUrl(config)}/pricelists/${priceListId}/records`;
+  const headers = buildHeaders(config);
+  const allRecords: BigCommercePriceListRecord[] = [];
+  let page = 1;
+
+  while (true) {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      page: String(page),
+    });
+    if (options.currency) params.set("currency_code", options.currency);
+
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`BigCommerce Price List Records API error (${response.status}): ${text}`);
+    }
+
+    const payload = await response.json();
+    const data: BigCommercePriceListRecord[] = payload.data ?? [];
+
+    if (data.length === 0) break;
+
+    allRecords.push(...data);
+
+    const pagination = payload.meta?.pagination ?? {};
+    const totalPages: number | undefined = pagination.total_pages;
+    const currentPage: number = pagination.current_page ?? page;
+
+    if (totalPages !== undefined && currentPage >= totalPages) break;
+    if (totalPages === undefined && data.length < pageSize) break;
+
+    page += 1;
+  }
+
+  return allRecords;
+}
+
+// ---------------------------------------------------------------------------
 // Price updates
 // ---------------------------------------------------------------------------
 
-/**
- * Updates a single product's price fields in BigCommerce.
- * Returns an object with the result:
- *   - error: null on success, string on failure
- *   - notFound: true if the product ID returned 404 (stale cache)
- */
 export async function updateProductPrice(
   update: {
     id: number;
@@ -521,10 +603,6 @@ export async function updateProductPrice(
   return { error: null, notFound: false };
 }
 
-/**
- * Looks up a product in BigCommerce by SKU.
- * Returns the BC product ID if found, or null if not found.
- */
 export async function findProductIdBySku(
   sku: string,
   config: BigCommerceConfig,

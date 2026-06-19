@@ -52,7 +52,7 @@ interface SectionEditorProps {
   onReorderItems: (sectionId: string, items: SectionItem[]) => void;
   onUpdateProductDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
   onUpdateProductVariants: (sectionId: string, productId: string, variants: ProductVariant[]) => void;
-  onUpdateProductOptions: (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean }) => void;
+  onUpdateProductOptions: (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean; show_price_list?: boolean }) => void;
   onUpdateLayout: (sectionId: string, layout: "1-col" | "2-col") => void;
 }
 
@@ -86,7 +86,7 @@ function SortableProductRow({
   onRemove: (sectionId: string, itemId: string) => void;
   onUpdateDescription: (sectionId: string, productId: string, user_description: string | null, description_source: "ai" | "custom") => void;
   onUpdateVariants: (sectionId: string, productId: string, variants: ProductVariant[]) => void;
-  onUpdateOptions: (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean }) => void;
+  onUpdateOptions: (sectionId: string, productId: string, options: { show_price?: boolean; show_sale_price?: boolean; show_cost_price?: boolean; show_variants?: boolean; show_price_list?: boolean }) => void;
 }) {
   const {
     attributes,
@@ -131,6 +131,8 @@ function SortableProductRow({
   const showSalePrice = product.show_sale_price ?? false;
   const showCostPrice = product.show_cost_price ?? false;
   const showVariants = product.show_variants ?? true;
+  const showPriceList = product.show_price_list ?? false;
+  const hasPriceListPrice = product.price_list_price != null;
 
   const addVariant = () => {
     const name = variantName.trim();
@@ -191,6 +193,17 @@ function SortableProductRow({
         />
         Variants
       </label>
+      {hasPriceListPrice && (
+        <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showPriceList}
+            onChange={(e) => onUpdateOptions(sectionId, product.product_cache_id, { show_price_list: e.target.checked })}
+            className="rounded border-border text-accent focus:ring-accent w-3 h-3"
+          />
+          {product.price_list_label ? `${product.price_list_label} price` : "Price list price"}
+        </label>
+      )}
     </div>
   );
 
