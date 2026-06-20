@@ -2,6 +2,13 @@
 -- Supabase Schema for Master Product Manager
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New Query)
 -- ============================================================================
+-- MULTI-USER / ORGANIZATIONS: this base schema describes the original
+-- single-user model. To enable the Organization model (shared workspace with
+-- Owner/Editor roles), run `supabase-migration-organizations.sql` AFTER this
+-- file. That migration adds the organizations / organization_members /
+-- organization_invites tables, re-scopes all data to organization_id, and
+-- migrates existing per-user data + collaborator_emails into orgs.
+-- ============================================================================
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
