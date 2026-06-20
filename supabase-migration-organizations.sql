@@ -121,14 +121,42 @@ ON CONFLICT (org_id, user_id) DO NOTHING;
 -- Convert legacy collaborator_emails into Editor memberships of the owner's org.
 -- (A user who was a collaborator AND owns their own org will end up in two orgs;
 --  the app resolves the owned org first. Owners can clean this up from the Team UI.)
-INSERT INTO organization_members (org_id, user_id, org_role)
-SELECT o.id, collab.id, 'editor'
-FROM profiles owner_p
-JOIN organizations o   ON o.owner_id = owner_p.id
-CROSS JOIN LATERAL unnest(COALESCE(owner_p.collaborator_emails, '{}')) AS ce(email)
-JOIN profiles collab   ON lower(collab.email) = lower(ce.email)
-WHERE collab.id <> owner_p.id
-ON CONFLICT (org_id, user_id) DO NOTHING;
+-- collaborator_emails has been stored as either text[] or jsonb across installs,
+-- so detect the column type and use the matching element-expansion function. If
+-- the column doesn't exist, skip silently.
+DO $$
+DECLARE
+  col_type TEXT;
+BEGIN
+  SELECT data_type INTO col_type
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'profiles'
+    AND column_name = 'collaborator_emails';
+
+  IF col_type = 'ARRAY' THEN
+    INSERT INTO organization_members (org_id, user_id, org_role)
+    SELECT o.id, collab.id, 'editor'
+    FROM profiles owner_p
+    JOIN organizations o ON o.owner_id = owner_p.id
+    CROSS JOIN LATERAL unnest(owner_p.collaborator_emails) AS ce(email)
+    JOIN profiles collab ON lower(collab.email) = lower(ce.email)
+    WHERE owner_p.collaborator_emails IS NOT NULL
+      AND collab.id <> owner_p.id
+    ON CONFLICT (org_id, user_id) DO NOTHING;
+
+  ELSIF col_type = 'jsonb' THEN
+    INSERT INTO organization_members (org_id, user_id, org_role)
+    SELECT o.id, collab.id, 'editor'
+    FROM profiles owner_p
+    JOIN organizations o ON o.owner_id = owner_p.id
+    CROSS JOIN LATERAL jsonb_array_elements_text(owner_p.collaborator_emails) AS ce(email)
+    JOIN profiles collab ON lower(collab.email) = lower(ce.email)
+    WHERE owner_p.collaborator_emails IS NOT NULL
+      AND collab.id <> owner_p.id
+    ON CONFLICT (org_id, user_id) DO NOTHING;
+  END IF;
+END $$;
 
 -- ============================================================================
 -- 6. Add organization_id to every user-scoped data table and backfill it from
