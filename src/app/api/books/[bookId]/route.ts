@@ -1,43 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg, requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Returns the book if uid is the owner OR if the owner has added the user's
- * email as a collaborator. Returns null if not found / no access.
+ * Returns the book if it belongs to the user's organization, else null.
  */
 async function getAccessibleBook(
   supabase: SupabaseClient,
   bookId: string,
-  uid: string,
-  email: string | undefined
+  orgId: string
 ) {
   const { data: book } = await supabase
     .from("books")
     .select("*")
     .eq("id", bookId)
+    .eq("organization_id", orgId)
     .single();
 
-  if (!book) return null;
-  if (book.user_id === uid) return book;
-
-  if (email) {
-    const { data: ownerProfile } = await supabase
-      .from("profiles")
-      .select("collaborator_emails")
-      .eq("id", book.user_id)
-      .single();
-
-    if (
-      Array.isArray(ownerProfile?.collaborator_emails) &&
-      ownerProfile.collaborator_emails.includes(email)
-    ) {
-      return book;
-    }
-  }
-
-  return null;
+  return book ?? null;
 }
 
 export async function GET(
@@ -48,14 +29,12 @@ export async function GET(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
-    const book = await getAccessibleBook(
-      supabase,
-      bookId,
-      auth.user.uid,
-      auth.user.email
-    );
+    const book = await getAccessibleBook(supabase, bookId, orgResolved.org.orgId);
 
     if (!book) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
@@ -77,15 +56,13 @@ export async function PUT(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
 
-    const existing = await getAccessibleBook(
-      supabase,
-      bookId,
-      auth.user.uid,
-      auth.user.email
-    );
+    const existing = await getAccessibleBook(supabase, bookId, orgResolved.org.orgId);
 
     if (!existing) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
@@ -147,16 +124,17 @@ export async function DELETE(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  const uid = auth.user.uid;
+  // Deleting a book is destructive — Owner only.
+  const owner = await requireOrgOwner(auth.user.uid);
+  if (owner.error) return owner.error;
 
   try {
     const supabase = createAdminClient();
-    // Only the owner can delete
     const { error } = await supabase
       .from("books")
       .delete()
       .eq("id", bookId)
-      .eq("user_id", uid);
+      .eq("organization_id", owner.org.orgId);
 
     if (error) throw error;
 

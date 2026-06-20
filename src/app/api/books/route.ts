@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
@@ -7,34 +7,25 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
-  const email = auth.user.email;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
 
   try {
     const supabase = createAdminClient();
 
-    // Find profiles that have granted the current user collaborator access
-    let sharedUserIds: string[] = [];
-    if (email) {
-      const { data: sharedProfiles } = await supabase
-        .from("profiles")
-        .select("id")
-        .contains("collaborator_emails", [email]);
-      sharedUserIds = sharedProfiles?.map((p: { id: string }) => p.id) || [];
-    }
-
-    const allUserIds = [uid, ...sharedUserIds];
     const { data: books, error } = await supabase
       .from("books")
       .select("*")
-      .in("user_id", allUserIds)
+      .eq("organization_id", orgResolved.org.orgId)
       .order("updated_at", { ascending: false });
 
     if (error) throw error;
 
-    // Tag each book with whether the current user is the owner
+    // In the shared org workspace every member can edit books; delete is gated
+    // separately to Owners by the API.
     const tagged = (books || []).map((b) => ({
       ...b,
-      is_owned_by_me: b.user_id === uid,
+      is_owned_by_me: true,
     }));
 
     return NextResponse.json({ books: tagged });
@@ -50,6 +41,8 @@ export async function POST(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
 
   try {
     const body = await req.json();
@@ -67,6 +60,7 @@ export async function POST(req: NextRequest) {
       .from("books")
       .insert({
         user_id: uid,
+        organization_id: orgResolved.org.orgId,
         title,
         description: description || "",
         status: "draft",

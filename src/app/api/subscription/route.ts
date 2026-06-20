@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken, extractBearerToken } from "@/lib/supabase/auth";
-import { getSubscription, isEntitled } from "@/lib/subscription";
+import { getSubscription, isEntitled, getOrgOwnerId } from "@/lib/subscription";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
@@ -21,17 +21,22 @@ export async function GET(req: NextRequest) {
     .maybeSingle();
   const isAdmin = profile?.role === "admin";
 
-  const sub = await getSubscription(decoded.uid);
+  // Entitlement is owner-gated: members ride on their Owner's subscription.
+  const ownerId = await getOrgOwnerId(decoded.uid);
+  const isOrgOwner = ownerId === decoded.uid;
+  const sub = await getSubscription(ownerId);
   const entitled = isAdmin || isEntitled(sub);
 
   return NextResponse.json({
     entitled,
     is_admin: isAdmin,
+    is_org_owner: isOrgOwner,
     status: sub?.status ?? null,
     plan: sub?.plan ?? null,
     current_period_end: sub?.current_period_end ?? null,
     trial_end: sub?.trial_end ?? null,
     cancel_at_period_end: sub?.cancel_at_period_end ?? false,
-    has_stripe_customer: !!sub?.stripe_customer_id,
+    // Only the Owner manages billing, so only expose the Stripe customer to them.
+    has_stripe_customer: isOrgOwner && !!sub?.stripe_customer_id,
   });
 }

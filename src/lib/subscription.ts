@@ -72,8 +72,35 @@ export function isEntitled(sub: SubscriptionRecord | null): boolean {
 }
 
 /**
+ * Resolve the owner of the user's active organization. Falls back to the user
+ * themselves if no membership exists. Entitlement is owner-gated: members ride
+ * on their Owner's subscription.
+ */
+export async function getOrgOwnerId(userId: string): Promise<string> {
+  const supabase = createAdminClient();
+
+  const { data: rows } = await supabase
+    .from("organization_members")
+    .select("org_role, organizations(owner_id)")
+    .eq("user_id", userId);
+
+  if (rows && rows.length > 0) {
+    const sorted = [...rows].sort((a, b) =>
+      a.org_role === "owner" ? -1 : b.org_role === "owner" ? 1 : 0
+    );
+    const orgRel = Array.isArray(sorted[0].organizations)
+      ? sorted[0].organizations[0]
+      : sorted[0].organizations;
+    if (orgRel?.owner_id) return orgRel.owner_id as string;
+  }
+
+  return userId;
+}
+
+/**
  * Convenience: returns true if a user (by ID) currently has access.
- * Admins always pass.
+ * Site admins always pass. Otherwise entitlement is owner-gated — the user has
+ * access as long as their organization's Owner is entitled.
  */
 export async function hasAccess(userId: string): Promise<boolean> {
   const supabase = createAdminClient();
@@ -86,6 +113,7 @@ export async function hasAccess(userId: string): Promise<boolean> {
 
   if (profile?.role === "admin") return true;
 
-  const sub = await getSubscription(userId);
+  const ownerId = await getOrgOwnerId(userId);
+  const sub = await getSubscription(ownerId);
   return isEntitled(sub);
 }

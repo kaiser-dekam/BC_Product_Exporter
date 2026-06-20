@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getAccessibleUserIds } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 // Fields for list view (excludes raw_data, description, image_urls, categories, category_names)
@@ -15,7 +15,9 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
-  const email = auth.user.email;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
+  const { orgId } = orgResolved.org;
   const { searchParams } = new URL(req.url);
 
   const limit = Math.min(
@@ -31,17 +33,14 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = createAdminClient();
 
-    // Include products from collaborator accounts
-    const accessibleIds = await getAccessibleUserIds(uid, email);
-
     // Use offset-based pagination (cursor converted to offset for backward compat)
     const effectiveOffset = cursor ? Number(cursor) || 0 : offset;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: products, error, count } = await (supabase
       .from("product_cache")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .select(fields as any, { count: "exact" })
-      .in("user_id", accessibleIds)
+      .eq("organization_id", orgId)
       .order("name", { ascending: true })
       .range(effectiveOffset, effectiveOffset + limit - 1));
 

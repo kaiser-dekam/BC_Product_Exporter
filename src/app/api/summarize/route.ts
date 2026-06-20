@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getSiteSettings, getAccessibleUserIds } from "@/lib/api-helpers";
+import { authenticateRequest, getSiteSettings, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/crypto";
 
@@ -40,12 +40,12 @@ Weight: ${product.weight ?? ""} lbs
 Dimensions: ${product.width ?? ""} x ${product.height ?? ""} x ${product.depth ?? ""} in`;
 }
 
-async function loadAnthropicApiKey(uid: string): Promise<string | null> {
+async function loadAnthropicApiKey(orgId: string): Promise<string | null> {
   const supabase = createAdminClient();
   const { data } = await supabase
-    .from("profiles")
+    .from("organizations")
     .select("anthropic_api_key_encrypted, anthropic_iv, anthropic_auth_tag")
-    .eq("id", uid)
+    .eq("id", orgId)
     .single();
 
   if (!data) return null;
@@ -74,7 +74,9 @@ export async function POST(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
-  const email = auth.user.email;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
+  const { orgId } = orgResolved.org;
 
   let body: { product_ids?: string[]; system_prompt?: string };
   try {
@@ -95,8 +97,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Resolve the Anthropic API key
-  let apiKey = await loadAnthropicApiKey(uid);
+  // Resolve the Anthropic API key (shared at the org level)
+  let apiKey = await loadAnthropicApiKey(orgId);
   if (!apiKey) {
     apiKey = process.env.ANTHROPIC_API_KEY ?? null;
   }
@@ -114,13 +116,13 @@ export async function POST(req: NextRequest) {
   const supabase = createAdminClient();
   let systemPrompt = system_prompt || null;
   if (!systemPrompt) {
-    const { data: profileData } = await supabase
-      .from("profiles")
+    const { data: orgData } = await supabase
+      .from("organizations")
       .select("claude_system_prompt")
-      .eq("id", uid)
+      .eq("id", orgId)
       .single();
-    if (profileData) {
-      systemPrompt = profileData.claude_system_prompt || null;
+    if (orgData) {
+      systemPrompt = orgData.claude_system_prompt || null;
     }
   }
   if (!systemPrompt) {
@@ -130,8 +132,6 @@ export async function POST(req: NextRequest) {
   // Load site-wide model setting
   const siteSettings = await getSiteSettings();
   const claudeModel = siteSettings.default_claude_model;
-
-  const accessibleIds = await getAccessibleUserIds(uid, email);
 
   const errors: string[] = [];
   let summarized = 0;
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
         .from("product_cache")
         .select("*")
         .eq("id", productId)
-        .in("user_id", accessibleIds)
+        .eq("organization_id", orgId)
         .single();
 
       if (fetchError || !productData) {
@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
           summarized_at: new Date().toISOString(),
         })
         .eq("id", productId)
-        .eq("user_id", uid);
+        .eq("organization_id", orgId);
 
       if (updateError) {
         errors.push(`Failed to save summary for ${productId}: ${updateError.message}`);

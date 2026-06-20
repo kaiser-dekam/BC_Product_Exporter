@@ -169,6 +169,11 @@ BEGIN
   END LOOP;
 END $$;
 
+-- description_drafts are shared per organization: one draft per (org, product).
+-- This unique index lets the API upsert on (organization_id, product_id).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_description_drafts_org_product
+  ON description_drafts (organization_id, product_id);
+
 -- ============================================================================
 -- 7. Row Level Security — re-scope from per-user to per-organization.
 --    (Defense-in-depth; the app's service-role client bypasses RLS and the API

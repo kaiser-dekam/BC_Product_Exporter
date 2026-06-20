@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 // GET /api/price-lists — list all price lists with record counts
@@ -7,7 +7,8 @@ export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
 
   try {
     const supabase = createAdminClient();
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabase
       .from("price_lists")
       .select("id, name, created_at")
-      .eq("user_id", uid)
+      .eq("organization_id", orgResolved.org.orgId)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -52,6 +53,8 @@ export async function POST(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
 
   try {
     const body = await req.json();
@@ -73,7 +76,7 @@ export async function POST(req: NextRequest) {
     // Create the price list
     const { data: pl, error: plError } = await supabase
       .from("price_lists")
-      .insert({ user_id: uid, name: name.trim() })
+      .insert({ user_id: uid, organization_id: orgResolved.org.orgId, name: name.trim() })
       .select("id, name, created_at")
       .single();
 

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, loadCredentialsFromProfile } from "@/lib/api-helpers";
+import { authenticateRequest, loadCredentialsFromProfile, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { updateProductPrice, findProductIdBySku } from "@/lib/bigcommerce/client";
 
 interface PriceUpdate {
-  id: string; // product_cache composite id: {user_id}_{bc_product_id}
+  id: string; // product_cache composite id: {org_owner_id}_{bc_product_id}
   price?: number;
   sale_price?: number;
   cost_price?: number;
@@ -15,6 +15,9 @@ export async function PUT(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
+  const { orgId } = orgResolved.org;
 
   let body: { updates: PriceUpdate[] };
   try {
@@ -51,7 +54,7 @@ export async function PUT(req: NextRequest) {
     .from("product_cache")
     .select("id, bigcommerce_product_id, name, sku")
     .in("id", cacheIds)
-    .eq("user_id", uid);
+    .eq("organization_id", orgId);
 
   if (fetchError) {
     return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -150,7 +153,7 @@ export async function PUT(req: NextRequest) {
           .from("product_cache")
           .update(fields)
           .eq("id", item.id)
-          .eq("user_id", uid);
+          .eq("organization_id", orgId);
 
         if (error) cacheErrors.push(`${item.id}: ${error.message}`);
       })

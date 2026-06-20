@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getAccessibleUserIds } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 const CHUNK_SIZE = 500;
@@ -8,17 +8,18 @@ export async function POST(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
   const uid = auth.user.uid;
-  const email = auth.user.email;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
+  const { orgId } = orgResolved.org;
 
   try {
     const supabase = createAdminClient();
-    const accessibleIds = await getAccessibleUserIds(uid, email);
 
     // Fetch all products (only the fields we need)
     const { data: products, error: fetchError } = await supabase
       .from("product_cache")
       .select("id, name, sku, price, sale_price, cost_price, description")
-      .in("user_id", accessibleIds)
+      .eq("organization_id", orgId)
       .order("name", { ascending: true });
 
     if (fetchError) throw fetchError;
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
       .from("product_snapshots")
       .insert({
         user_id: uid,
+        organization_id: orgId,
         label,
         product_count: products.length,
       })
@@ -83,7 +85,8 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
-  const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
 
   try {
     const supabase = createAdminClient();
@@ -91,7 +94,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabase
       .from("product_snapshots")
       .select("id, label, product_count, created_at")
-      .eq("user_id", uid)
+      .eq("organization_id", orgResolved.org.orgId)
       .order("created_at", { ascending: false });
 
     if (error) throw error;

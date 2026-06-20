@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, loadCredentialsFromProfile } from "@/lib/api-helpers";
+import { authenticateRequest, loadCredentialsFromProfile, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { bcRaw } from "@/lib/bigcommerce/raw";
 
@@ -9,6 +9,11 @@ export async function POST(
 ) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
+
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+  const { orgId } = orgResolved.org;
+
   const creds = await loadCredentialsFromProfile(auth.user.uid);
   if (creds.error) return creds.error;
 
@@ -18,7 +23,7 @@ export async function POST(
   const { data: draft, error: readErr } = await supabase
     .from("description_drafts")
     .select("description")
-    .eq("user_id", auth.user.uid)
+    .eq("organization_id", orgId)
     .eq("product_id", productId)
     .maybeSingle();
 
@@ -33,7 +38,7 @@ export async function POST(
     await supabase
       .from("description_drafts")
       .delete()
-      .eq("user_id", auth.user.uid)
+      .eq("organization_id", orgId)
       .eq("product_id", productId);
     return NextResponse.json({ ok: true, data: result.data });
   }

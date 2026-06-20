@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, resolveCredentials } from "@/lib/api-helpers";
+import { authenticateRequest, resolveCredentials, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { fetchProducts, fetchBrandMap, fetchCategoryMap, fetchVariantsForProduct } from "@/lib/bigcommerce/client";
 
@@ -36,6 +36,10 @@ export async function POST(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
   const uid = auth.user.uid;
+
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
+  const { orgId, ownerId } = orgResolved.org;
 
   try {
     const body = await req.json();
@@ -86,8 +90,11 @@ export async function POST(req: NextRequest) {
       const chunk = products.slice(i, i + CHUNK_SIZE);
 
       const rows = chunk.map((product) => ({
-        id: `${uid}_${product.id}`,
+        // Keyed by the org owner's uid so any member's sync upserts the same
+        // shared catalog rows rather than creating duplicates.
+        id: `${ownerId}_${product.id}`,
         user_id: uid,
+        organization_id: orgId,
         bigcommerce_product_id: product.id,
         name: product.name,
         sku: product.sku || "",
@@ -120,14 +127,14 @@ export async function POST(req: NextRequest) {
         .upsert(rows, { onConflict: "id" });
     }
 
-    // Update profile sync metadata
+    // Update org sync metadata
     await supabase
-      .from("profiles")
+      .from("organizations")
       .update({
         last_synced_at: new Date().toISOString(),
         product_count: products.length,
       })
-      .eq("id", uid);
+      .eq("id", orgId);
 
     return NextResponse.json({ status: "ok", synced: products.length });
   } catch (error: unknown) {
@@ -141,12 +148,15 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
   const uid = auth.user.uid;
 
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
     const { data } = await supabase
-      .from("profiles")
+      .from("organizations")
       .select("last_synced_at, product_count")
-      .eq("id", uid)
+      .eq("id", orgResolved.org.orgId)
       .single();
 
     return NextResponse.json({

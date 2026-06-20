@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 /**
@@ -13,17 +13,21 @@ export async function POST(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
 
-    // Verify ownership
+    // Verify the book belongs to the user's organization
     const { data: book } = await supabase
       .from("books")
-      .select("id, user_id")
+      .select("id")
       .eq("id", bookId)
+      .eq("organization_id", orgResolved.org.orgId)
       .single();
 
-    if (!book || book.user_id !== auth.user.uid) {
+    if (!book) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
@@ -84,16 +88,18 @@ export async function DELETE(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
 
-    // Only the owner can delete versions
     const { error } = await supabase
       .from("book_versions")
       .delete()
       .eq("id", versionId)
       .eq("book_id", bookId)
-      .eq("user_id", auth.user.uid);
+      .eq("organization_id", orgResolved.org.orgId);
 
     if (error) throw error;
 

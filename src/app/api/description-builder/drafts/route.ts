@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("description_drafts")
     .select("product_id,description,name,sku,updated_at")
-    .eq("user_id", auth.user.uid);
+    .eq("organization_id", orgResolved.org.orgId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

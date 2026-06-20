@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg, requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function PATCH(
@@ -9,7 +9,8 @@ export async function PATCH(
   const { snapshotId } = await params;
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
-  const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
 
   let body: { label?: string };
   try {
@@ -29,7 +30,7 @@ export async function PATCH(
       .from("product_snapshots")
       .update({ label: body.label.trim() })
       .eq("id", snapshotId)
-      .eq("user_id", uid)
+      .eq("organization_id", orgResolved.org.orgId)
       .select("id, label")
       .single();
 
@@ -51,7 +52,10 @@ export async function DELETE(
   const { snapshotId } = await params;
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
-  const uid = auth.user.uid;
+
+  // Deleting a snapshot is destructive — Owner only.
+  const owner = await requireOrgOwner(auth.user.uid);
+  if (owner.error) return owner.error;
 
   try {
     const supabase = createAdminClient();
@@ -60,7 +64,7 @@ export async function DELETE(
       .from("product_snapshots")
       .delete()
       .eq("id", snapshotId)
-      .eq("user_id", uid)
+      .eq("organization_id", owner.org.orgId)
       .select("id")
       .single();
 

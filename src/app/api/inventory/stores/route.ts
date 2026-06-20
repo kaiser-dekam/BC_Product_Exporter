@@ -3,6 +3,8 @@ import {
   authenticateRequest,
   encryptBigCommerceCredentials,
   decryptBigCommerceCredentials,
+  resolveOrg,
+  requireOrgOwner,
 } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { fetchInventoryItems } from "@/lib/bigcommerce/client";
@@ -29,11 +31,14 @@ export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   const supabase = createAdminClient();
   const { data: stores, error } = await supabase
     .from("inventory_stores")
     .select("id, name, credentials, sku_prefix, sort_order")
-    .eq("user_id", auth.user.uid)
+    .eq("organization_id", orgResolved.org.orgId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
 
@@ -85,10 +90,13 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ stores: results });
 }
 
-// POST /api/inventory/stores — add another BigCommerce store
+// POST /api/inventory/stores — add another BigCommerce store (Owner only)
 export async function POST(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
+
+  const owner = await requireOrgOwner(auth.user.uid);
+  if (owner.error) return owner.error;
 
   const body = await req.json().catch(() => null);
   const name = body?.name?.trim();
@@ -140,12 +148,13 @@ export async function POST(req: NextRequest) {
   const { count } = await supabase
     .from("inventory_stores")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", auth.user.uid);
+    .eq("organization_id", owner.org.orgId);
 
   const { data, error } = await supabase
     .from("inventory_stores")
     .insert({
       user_id: auth.user.uid,
+      organization_id: owner.org.orgId,
       name,
       credentials: encryptBigCommerceCredentials(config),
       sku_prefix,

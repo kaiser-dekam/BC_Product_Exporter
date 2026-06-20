@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -9,7 +9,8 @@ export async function GET(
   const { snapshotId } = await params;
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
-  const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
 
   const { searchParams } = new URL(req.url);
   const page = Math.max(Number(searchParams.get("page")) || 1, 1);
@@ -19,12 +20,12 @@ export async function GET(
   try {
     const supabase = createAdminClient();
 
-    // Verify snapshot belongs to user
+    // Verify snapshot belongs to the organization
     const { data: snapshot, error: snapError } = await supabase
       .from("product_snapshots")
       .select("id")
       .eq("id", snapshotId)
-      .eq("user_id", uid)
+      .eq("organization_id", orgResolved.org.orgId)
       .single();
 
     if (snapError || !snapshot) {

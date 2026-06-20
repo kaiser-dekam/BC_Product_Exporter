@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getSiteSettings } from "@/lib/api-helpers";
+import { authenticateRequest, getSiteSettings, requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { encrypt } from "@/lib/crypto";
 
@@ -7,29 +7,32 @@ export async function PUT(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const owner = await requireOrgOwner(auth.user.uid);
+  if (owner.error) return owner.error;
+
   const { api_key } = await req.json();
 
   const supabase = createAdminClient();
 
   if (!api_key) {
     await supabase
-      .from("profiles")
+      .from("organizations")
       .update({
         anthropic_api_key_encrypted: null,
         anthropic_iv: null,
         anthropic_auth_tag: null,
       })
-      .eq("id", auth.user.uid);
+      .eq("id", owner.org.orgId);
   } else {
     const encrypted = encrypt(api_key);
     await supabase
-      .from("profiles")
+      .from("organizations")
       .update({
         anthropic_api_key_encrypted: encrypted.ciphertext,
         anthropic_iv: encrypted.iv,
         anthropic_auth_tag: encrypted.authTag,
       })
-      .eq("id", auth.user.uid);
+      .eq("id", owner.org.orgId);
   }
 
   return NextResponse.json({ status: "ok" });

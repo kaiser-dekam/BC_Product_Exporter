@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg, requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { fetchSheetInventory, parseSheetUrl } from "@/lib/google-sheets";
 
@@ -24,11 +24,14 @@ export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   const supabase = createAdminClient();
   const { data: sheets, error } = await supabase
     .from("inventory_sheets")
     .select("id, name, sheet_url, sku_column, stock_column, sku_prefix, sort_order")
-    .eq("user_id", auth.user.uid)
+    .eq("organization_id", orgResolved.org.orgId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
 
@@ -65,10 +68,13 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ sheets: results });
 }
 
-// POST /api/inventory/sheets — add a new Google Sheet source
+// POST /api/inventory/sheets — add a new Google Sheet source (Owner only)
 export async function POST(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
+
+  const owner = await requireOrgOwner(auth.user.uid);
+  if (owner.error) return owner.error;
 
   const body = await req.json().catch(() => null);
   const name = body?.name?.trim();
@@ -93,12 +99,13 @@ export async function POST(req: NextRequest) {
   const { count } = await supabase
     .from("inventory_sheets")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", auth.user.uid);
+    .eq("organization_id", owner.org.orgId);
 
   const { data, error } = await supabase
     .from("inventory_sheets")
     .insert({
       user_id: auth.user.uid,
+      organization_id: owner.org.orgId,
       name,
       sheet_url,
       sku_column,

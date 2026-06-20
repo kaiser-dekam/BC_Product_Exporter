@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -10,38 +10,22 @@ export async function GET(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
 
-    // Verify the user has access to this book
+    // Verify the book belongs to the user's organization
     const { data: book } = await supabase
       .from("books")
-      .select("id, user_id")
+      .select("id")
       .eq("id", bookId)
+      .eq("organization_id", orgResolved.org.orgId)
       .single();
 
     if (!book) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
-    }
-
-    // Check ownership or collaborator access
-    if (book.user_id !== auth.user.uid) {
-      if (auth.user.email) {
-        const { data: ownerProfile } = await supabase
-          .from("profiles")
-          .select("collaborator_emails")
-          .eq("id", book.user_id)
-          .single();
-
-        if (
-          !Array.isArray(ownerProfile?.collaborator_emails) ||
-          !ownerProfile.collaborator_emails.includes(auth.user.email)
-        ) {
-          return NextResponse.json({ error: "Book not found" }, { status: 404 });
-        }
-      } else {
-        return NextResponse.json({ error: "Book not found" }, { status: 404 });
-      }
     }
 
     // Fetch versions (lightweight — no sections/cover_config payload)
@@ -69,23 +53,22 @@ export async function POST(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
+
   try {
     const supabase = createAdminClient();
 
-    // Fetch the current book state
+    // Fetch the current book state (must belong to the org)
     const { data: book } = await supabase
       .from("books")
-      .select("id, user_id, title, description, cover_config, sections")
+      .select("id, title, description, cover_config, sections")
       .eq("id", bookId)
+      .eq("organization_id", orgResolved.org.orgId)
       .single();
 
     if (!book) {
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
-    }
-
-    // Only the owner can save versions
-    if (book.user_id !== auth.user.uid) {
-      return NextResponse.json({ error: "Only the book owner can save versions" }, { status: 403 });
     }
 
     const body = await req.json();
@@ -101,6 +84,7 @@ export async function POST(
       .insert({
         book_id: bookId,
         user_id: auth.user.uid,
+        organization_id: orgResolved.org.orgId,
         label,
         title: book.title,
         description: book.description,

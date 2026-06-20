@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   authenticateRequest,
   loadCredentialsFromProfile,
-  getAccessibleUserIds,
+  resolveOrg,
 } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import {
@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
-  const email = auth.user.email;
+  const orgResolved = await resolveOrg(uid);
+  if (orgResolved.error) return orgResolved.error;
 
   const creds = await loadCredentialsFromProfile(uid);
   if (creds.error) return creds.error;
@@ -52,11 +53,10 @@ export async function GET(req: NextRequest) {
     // Build a SKU -> { name, image } map from the local product cache so the
     // table can show recognizable product names. Joined by SKU (case-insensitive).
     const supabase = createAdminClient();
-    const accessibleIds = await getAccessibleUserIds(uid, email);
     const { data: cacheRows } = await supabase
       .from("product_cache")
       .select("sku, name, primary_image_url")
-      .in("user_id", accessibleIds);
+      .eq("organization_id", orgResolved.org.orgId);
 
     const nameBySku = new Map<string, { name: string; image: string }>();
     for (const row of cacheRows ?? []) {

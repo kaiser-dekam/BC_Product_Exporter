@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 // GET /api/price-lists/[id] — fetch price list records as a SKU→price map
@@ -10,18 +10,19 @@ export async function GET(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
   const { id } = await params;
 
   try {
     const supabase = createAdminClient();
 
-    // Verify ownership
+    // Verify the price list belongs to the organization
     const { data: pl, error: plError } = await supabase
       .from("price_lists")
       .select("id, name")
       .eq("id", id)
-      .eq("user_id", uid)
+      .eq("organization_id", orgResolved.org.orgId)
       .single();
 
     if (plError || !pl) {
@@ -57,7 +58,8 @@ export async function DELETE(
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
-  const uid = auth.user.uid;
+  const orgResolved = await resolveOrg(auth.user.uid);
+  if (orgResolved.error) return orgResolved.error;
   const { id } = await params;
 
   try {
@@ -67,7 +69,7 @@ export async function DELETE(
       .from("price_lists")
       .delete()
       .eq("id", id)
-      .eq("user_id", uid);
+      .eq("organization_id", orgResolved.org.orgId);
 
     if (error) throw error;
 

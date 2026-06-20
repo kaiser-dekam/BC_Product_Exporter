@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/api-helpers";
+import { authenticateRequest, requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { encrypt } from "@/lib/crypto";
 
-// PUT - Save BigCommerce credentials (encrypted)
+// PUT - Save the organization's shared BigCommerce credentials (Owner only)
 export async function PUT(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
+
+  const owner = await requireOrgOwner(auth.user.uid);
+  if (owner.error) return owner.error;
 
   const { store_hash, client_id, access_token } = await req.json();
 
@@ -23,7 +26,7 @@ export async function PUT(req: NextRequest) {
 
   const supabase = createAdminClient();
   await supabase
-    .from("profiles")
+    .from("organizations")
     .update({
       bigcommerce_credentials: {
         store_hash_encrypted: storeHashEnc.ciphertext,
@@ -37,7 +40,7 @@ export async function PUT(req: NextRequest) {
         access_token_authTag: accessTokenEnc.authTag,
       },
     })
-    .eq("id", auth.user.uid);
+    .eq("id", owner.org.orgId);
 
   return NextResponse.json({ status: "ok" });
 }

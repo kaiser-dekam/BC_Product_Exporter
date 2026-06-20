@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken, extractBearerToken } from "@/lib/supabase/auth";
+import { requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getStripe, getAppUrl } from "@/lib/stripe/server";
 
@@ -12,6 +13,10 @@ export async function POST(req: NextRequest) {
   if (!decoded) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  // Only the Owner manages billing for the organization.
+  const owner = await requireOrgOwner(decoded.uid);
+  if (owner.error) return owner.error;
 
   const supabase = createAdminClient();
   const { data: sub } = await supabase

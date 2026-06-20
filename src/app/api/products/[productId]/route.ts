@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getAccessibleUserIds } from "@/lib/api-helpers";
+import { authenticateRequest, resolveOrg } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -11,17 +11,18 @@ export async function GET(
   if (auth.error) return auth.error;
 
   const uid = auth.user.uid;
-  const email = auth.user.email;
 
   try {
+    const orgResolved = await resolveOrg(uid);
+    if (orgResolved.error) return orgResolved.error;
+
     const supabase = createAdminClient();
-    const accessibleIds = await getAccessibleUserIds(uid, email);
 
     const { data, error } = await supabase
       .from("product_cache")
       .select("*")
       .eq("id", productId)
-      .in("user_id", accessibleIds)
+      .eq("organization_id", orgResolved.org.orgId)
       .single();
 
     if (error || !data) {

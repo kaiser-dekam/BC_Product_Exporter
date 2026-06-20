@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, requireOrgOwner } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/server";
 
-// DELETE /api/inventory/stores/[id] — remove an additional BigCommerce store (Owner only)
+// DELETE /api/organization/invites/[inviteId] — cancel a pending invite (Owner only).
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ inviteId: string }> }
 ) {
-  const { id } = await params;
+  const { inviteId } = await params;
   const auth = await authenticateRequest(req);
   if (auth.error) return auth.error;
 
@@ -16,14 +16,11 @@ export async function DELETE(
 
   const supabase = createAdminClient();
   const { error } = await supabase
-    .from("inventory_stores")
+    .from("organization_invites")
     .delete()
-    .eq("id", id)
-    .eq("organization_id", owner.org.orgId);
+    .eq("id", inviteId)
+    .eq("org_id", owner.org.orgId);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ status: "ok" });
 }

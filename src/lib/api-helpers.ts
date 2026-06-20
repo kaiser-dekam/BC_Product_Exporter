@@ -98,8 +98,194 @@ export async function authenticateRequest(
   return { user: decoded };
 }
 
+// ---------------------------------------------------------------------------
+// Organization helpers
+// ---------------------------------------------------------------------------
+
+export type OrgRole = "owner" | "editor";
+
+export interface OrgContext {
+  orgId: string;
+  ownerId: string;
+  orgRole: OrgRole;
+}
+
 /**
- * Load and decrypt BigCommerce credentials from the user's profile.
+ * Resolve the user's active organization. If they belong to several, an org
+ * they own is preferred. If they belong to none (e.g. a freshly created
+ * account), one is provisioned with them as Owner so the app never lands a
+ * logged-in user without a workspace.
+ */
+export async function resolveOrg(
+  uid: string
+): Promise<
+  | { org: OrgContext; error?: never }
+  | { org?: never; error: NextResponse }
+> {
+  const supabase = createAdminClient();
+
+  const { data: rows } = await supabase
+    .from("organization_members")
+    .select("org_id, org_role, organizations(owner_id)")
+    .eq("user_id", uid);
+
+  if (rows && rows.length > 0) {
+    // Prefer an org the user owns.
+    const sorted = [...rows].sort((a, b) =>
+      a.org_role === "owner" ? -1 : b.org_role === "owner" ? 1 : 0
+    );
+    const row = sorted[0];
+    // Supabase types the embedded relation as an array; normalize.
+    const orgRel = Array.isArray(row.organizations)
+      ? row.organizations[0]
+      : row.organizations;
+    return {
+      org: {
+        orgId: row.org_id as string,
+        ownerId: (orgRel?.owner_id as string) ?? uid,
+        orgRole: row.org_role as OrgRole,
+      },
+    };
+  }
+
+  // No membership — provision a personal org for this user.
+  const provisioned = await ensureOrgForUser(uid);
+  if (!provisioned) {
+    return {
+      error: NextResponse.json(
+        { error: "No organization for user" },
+        { status: 404 }
+      ),
+    };
+  }
+  return { org: provisioned };
+}
+
+/**
+ * Create an organization owned by the given user if they don't already have a
+ * membership. Returns the resulting OrgContext, or null on failure. Settings
+ * (BigCommerce creds, Anthropic key, prefs) are copied off the profile so a
+ * pre-existing single-user setup carries over.
+ */
+export async function ensureOrgForUser(
+  uid: string
+): Promise<OrgContext | null> {
+  const supabase = createAdminClient();
+
+  const { data: existing } = await supabase
+    .from("organization_members")
+    .select("org_id, org_role, organizations(owner_id)")
+    .eq("user_id", uid)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    const row = existing[0];
+    const orgRel = Array.isArray(row.organizations)
+      ? row.organizations[0]
+      : row.organizations;
+    return {
+      orgId: row.org_id as string,
+      ownerId: (orgRel?.owner_id as string) ?? uid,
+      orgRole: row.org_role as OrgRole,
+    };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(
+      "email, store_name, full_name, bigcommerce_credentials, anthropic_api_key_encrypted, anthropic_iv, anthropic_auth_tag, claude_system_prompt, csv_preferences, book_preferences, last_synced_at, product_count"
+    )
+    .eq("id", uid)
+    .maybeSingle();
+
+  // If this user was invited to an org, join it rather than creating their own.
+  if (profile?.email) {
+    const { data: invite } = await supabase
+      .from("organization_invites")
+      .select("id, org_id, org_role, organizations(owner_id)")
+      .ilike("email", profile.email)
+      .limit(1)
+      .maybeSingle();
+
+    if (invite) {
+      await supabase
+        .from("organization_members")
+        .insert({
+          org_id: invite.org_id,
+          user_id: uid,
+          org_role: invite.org_role,
+        });
+      await supabase.from("organization_invites").delete().eq("id", invite.id);
+
+      const inviteOrgRel = Array.isArray(invite.organizations)
+        ? invite.organizations[0]
+        : invite.organizations;
+      return {
+        orgId: invite.org_id as string,
+        ownerId: (inviteOrgRel?.owner_id as string) ?? uid,
+        orgRole: invite.org_role as OrgRole,
+      };
+    }
+  }
+
+  const { data: org, error: orgErr } = await supabase
+    .from("organizations")
+    .insert({
+      name:
+        profile?.store_name || profile?.full_name || "My Organization",
+      owner_id: uid,
+      bigcommerce_credentials: profile?.bigcommerce_credentials ?? null,
+      anthropic_api_key_encrypted: profile?.anthropic_api_key_encrypted ?? null,
+      anthropic_iv: profile?.anthropic_iv ?? null,
+      anthropic_auth_tag: profile?.anthropic_auth_tag ?? null,
+      claude_system_prompt: profile?.claude_system_prompt ?? null,
+      csv_preferences: profile?.csv_preferences ?? null,
+      ...(profile?.book_preferences
+        ? { book_preferences: profile.book_preferences }
+        : {}),
+      store_name: profile?.store_name ?? "",
+      last_synced_at: profile?.last_synced_at ?? null,
+      product_count: profile?.product_count ?? 0,
+    })
+    .select("id, owner_id")
+    .single();
+
+  if (orgErr || !org) return null;
+
+  await supabase
+    .from("organization_members")
+    .insert({ org_id: org.id, user_id: uid, org_role: "owner" });
+
+  return { orgId: org.id as string, ownerId: uid, orgRole: "owner" };
+}
+
+/**
+ * Require that the user is an Owner of their active organization.
+ * Returns the OrgContext or a 403 error.
+ */
+export async function requireOrgOwner(
+  uid: string
+): Promise<
+  | { org: OrgContext; error?: never }
+  | { org?: never; error: NextResponse }
+> {
+  const resolved = await resolveOrg(uid);
+  if (resolved.error) return { error: resolved.error };
+
+  if (resolved.org.orgRole !== "owner") {
+    return {
+      error: NextResponse.json(
+        { error: "Forbidden: organization owner access required" },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { org: resolved.org };
+}
+
+/**
+ * Load and decrypt the organization's shared BigCommerce credentials.
  * Returns the config or a NextResponse error.
  */
 export async function loadCredentialsFromProfile(
@@ -108,17 +294,20 @@ export async function loadCredentialsFromProfile(
   | { config: BigCommerceConfig; error?: never }
   | { config?: never; error: NextResponse }
 > {
+  const resolved = await resolveOrg(uid);
+  if (resolved.error) return { error: resolved.error };
+
   const supabase = createAdminClient();
   const { data, error } = await supabase
-    .from("profiles")
+    .from("organizations")
     .select("bigcommerce_credentials")
-    .eq("id", uid)
+    .eq("id", resolved.org.orgId)
     .single();
 
   if (error || !data) {
     return {
       error: NextResponse.json(
-        { error: "Profile not found" },
+        { error: "Organization not found" },
         { status: 404 }
       ),
     };
@@ -148,8 +337,8 @@ export async function loadCredentialsFromProfile(
 }
 
 /**
- * Resolve BigCommerce credentials from either the request body or the user's profile.
- * If `credentials` is provided in the body, use it directly. Otherwise, load from DB.
+ * Resolve BigCommerce credentials from either the request body or the user's
+ * organization. If `credentials` is provided in the body, use it directly.
  */
 export async function resolveCredentials(
   uid: string,
@@ -172,38 +361,6 @@ export async function resolveCredentials(
   }
 
   return loadCredentialsFromProfile(uid);
-}
-
-// ---------------------------------------------------------------------------
-// Collaborator helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns an array of user IDs whose data the current user can access.
- * Includes their own uid plus any profile owners who have listed the
- * current user's email in `collaborator_emails`.
- */
-export async function getAccessibleUserIds(
-  uid: string,
-  email: string | undefined
-): Promise<string[]> {
-  const ids = [uid];
-
-  if (email) {
-    const supabase = createAdminClient();
-    const { data: sharedProfiles } = await supabase
-      .from("profiles")
-      .select("id")
-      .contains("collaborator_emails", [email]);
-
-    if (sharedProfiles) {
-      for (const p of sharedProfiles) {
-        if (!ids.includes(p.id)) ids.push(p.id);
-      }
-    }
-  }
-
-  return ids;
 }
 
 // ---------------------------------------------------------------------------
