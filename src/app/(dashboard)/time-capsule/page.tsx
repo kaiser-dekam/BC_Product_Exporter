@@ -29,7 +29,7 @@ interface SnapshotItem {
 const PAGE_SIZE = 25;
 
 export default function TimeCapsulePage() {
-  const { getIdToken } = useAuth();
+  const { getIdToken, isOrgOwner } = useAuth();
 
   // Snapshots
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -383,8 +383,8 @@ export default function TimeCapsulePage() {
                       </span>
                     </button>
                   )}
-                  {/* Delete button on hover */}
-                  {editingId !== snap.id && (
+                  {/* Delete button on hover — Owner only (destructive) */}
+                  {editingId !== snap.id && isOrgOwner && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

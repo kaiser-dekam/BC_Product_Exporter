@@ -68,11 +68,19 @@ export default function SettingsPage() {
   const [systemPromptLoading, setSystemPromptLoading] = useState(false);
   const [systemPromptMessage, setSystemPromptMessage] = useState<string | null>(null);
 
-  // Collaborators
-  const [collaboratorEmails, setCollaboratorEmails] = useState<string[]>([]);
-  const [newCollaboratorEmail, setNewCollaboratorEmail] = useState("");
-  const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
-  const [collaboratorsMessage, setCollaboratorsMessage] = useState<string | null>(null);
+  // Organization role (Owner can edit org-level settings; Editors cannot)
+  const [isOrgOwner, setIsOrgOwner] = useState(false);
+
+  // Team (organization members + pending invites)
+  type Member = { user_id: string; email: string; full_name: string; org_role: string; is_you: boolean };
+  type Invite = { id: string; email: string; org_role: string };
+  const [members, setMembers] = useState<Member[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"editor" | "owner">("editor");
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamMessage, setTeamMessage] = useState<string | null>(null);
 
   // Sales book defaults
   const [bookShowPrice, setBookShowPrice] = useState(true);
@@ -117,7 +125,7 @@ export default function SettingsPage() {
         setHasSavedCreds(!!data.has_bigcommerce_credentials);
         setHasSavedAnthropicKey(!!data.has_anthropic_key);
         setSystemPrompt(data.claude_system_prompt || "");
-        setCollaboratorEmails(data.collaborator_emails || []);
+        setIsOrgOwner(!!data.is_org_owner);
         const bp = data.book_preferences ?? {};
         setBookShowPrice(bp.show_price ?? bp.show_main_price ?? true);
         setBookShowSalePrice(bp.show_sale_price ?? false);
@@ -175,6 +183,30 @@ export default function SettingsPage() {
     loadPriceLists();
   }, [getIdToken]);
 
+  // Load team (members + pending invites)
+  const fetchTeam = useCallback(async () => {
+    setTeamLoading(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch("/api/organization/members", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data.members || []);
+        setInvites(data.invites || []);
+      }
+    } catch {
+      // Non-critical
+    } finally {
+      setTeamLoading(false);
+    }
+  }, [getIdToken]);
+
+  useEffect(() => {
+    fetchTeam();
+  }, [fetchTeam]);
+
   // Auto-clear helper
   const autoClear = useCallback(
     (setter: (val: string | null) => void) => {
@@ -195,7 +227,12 @@ export default function SettingsPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ full_name: fullName, store_name: storeName }),
+        // store_name is an org-level setting — only Owners may change it.
+        body: JSON.stringify(
+          isOrgOwner
+            ? { full_name: fullName, store_name: storeName }
+            : { full_name: fullName }
+        ),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -210,7 +247,7 @@ export default function SettingsPage() {
     } finally {
       setProfileLoading(false);
     }
-  }, [getIdToken, fullName, storeName, autoClear]);
+  }, [getIdToken, fullName, storeName, isOrgOwner, autoClear]);
 
   // Handler: Save BigCommerce Credentials
   const handleCredsSave = useCallback(async () => {
@@ -380,47 +417,105 @@ export default function SettingsPage() {
     autoClear(setSystemPromptMessage);
   }, [autoClear]);
 
-  // Handler: Add collaborator email
-  const handleAddCollaborator = useCallback(() => {
-    const email = newCollaboratorEmail.trim().toLowerCase();
-    if (!email || collaboratorEmails.includes(email)) return;
-    setCollaboratorEmails((prev) => [...prev, email]);
-    setNewCollaboratorEmail("");
-  }, [newCollaboratorEmail, collaboratorEmails]);
-
-  // Handler: Remove collaborator email
-  const handleRemoveCollaborator = useCallback((email: string) => {
-    setCollaboratorEmails((prev) => prev.filter((e) => e !== email));
-  }, []);
-
-  // Handler: Save collaborators
-  const handleCollaboratorsSave = useCallback(async () => {
-    setCollaboratorsLoading(true);
-    setCollaboratorsMessage(null);
+  // Handler: Invite a member by email
+  const handleInvite = useCallback(async () => {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email) return;
+    setTeamBusy(true);
+    setTeamMessage(null);
     try {
       const token = await getIdToken();
-      const res = await fetch("/api/profile", {
+      const res = await fetch("/api/organization/members", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ collaborator_emails: collaboratorEmails }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email, org_role: inviteRole }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to save collaborators");
-      }
-      setCollaboratorsMessage("Collaborators saved.");
-      autoClear(setCollaboratorsMessage);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to invite");
+      setInviteEmail("");
+      setTeamMessage(
+        data.added ? "Member added." : "Invite sent — they'll join when they sign up."
+      );
+      autoClear(setTeamMessage);
+      await fetchTeam();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      setCollaboratorsMessage(`Error: ${msg}`);
-      autoClear(setCollaboratorsMessage);
+      setTeamMessage(`Error: ${msg}`);
+      autoClear(setTeamMessage);
     } finally {
-      setCollaboratorsLoading(false);
+      setTeamBusy(false);
     }
-  }, [getIdToken, collaboratorEmails, autoClear]);
+  }, [getIdToken, inviteEmail, inviteRole, fetchTeam, autoClear]);
+
+  // Handler: Change a member's role
+  const handleChangeRole = useCallback(async (userId: string, org_role: string) => {
+    setTeamBusy(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/organization/members/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ org_role }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to change role");
+      }
+      await fetchTeam();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setTeamMessage(`Error: ${msg}`);
+      autoClear(setTeamMessage);
+    } finally {
+      setTeamBusy(false);
+    }
+  }, [getIdToken, fetchTeam, autoClear]);
+
+  // Handler: Remove a member
+  const handleRemoveMember = useCallback(async (userId: string) => {
+    setTeamBusy(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/organization/members/${userId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to remove member");
+      }
+      await fetchTeam();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setTeamMessage(`Error: ${msg}`);
+      autoClear(setTeamMessage);
+    } finally {
+      setTeamBusy(false);
+    }
+  }, [getIdToken, fetchTeam, autoClear]);
+
+  // Handler: Cancel a pending invite
+  const handleCancelInvite = useCallback(async (inviteId: string) => {
+    setTeamBusy(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/organization/invites/${inviteId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to cancel invite");
+      }
+      await fetchTeam();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setTeamMessage(`Error: ${msg}`);
+      autoClear(setTeamMessage);
+    } finally {
+      setTeamBusy(false);
+    }
+  }, [getIdToken, fetchTeam, autoClear]);
 
   // Handler: Save Sales Book Defaults
   const handleBookDefaultsSave = useCallback(async () => {
@@ -685,7 +780,13 @@ export default function SettingsPage() {
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
                 placeholder="My BigCommerce Store"
+                disabled={!isOrgOwner}
               />
+              {!isOrgOwner && (
+                <p className="text-xs text-muted -mt-2">
+                  Store name is managed by your organization&apos;s owner.
+                </p>
+              )}
               <div className="flex items-center gap-3">
                 <Button
                   onClick={handleProfileSave}
@@ -709,7 +810,21 @@ export default function SettingsPage() {
             </div>
           </Card>
 
+          {/* Sections 2–4 are organization-level settings — Owner only */}
+          {!isOrgOwner && (
+            <Card>
+              <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-2">
+                Organization Settings
+              </h3>
+              <p className="text-xs text-muted">
+                BigCommerce credentials, the Anthropic API key, the AI system prompt,
+                and sales-book defaults are managed by your organization&apos;s owner.
+              </p>
+            </Card>
+          )}
+
           {/* Section 2: BigCommerce Credentials */}
+          {isOrgOwner && (
           <Card>
             <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
               BigCommerce Credentials
@@ -800,7 +915,10 @@ export default function SettingsPage() {
             </div>
           </Card>
 
+          )}
+
           {/* Section 3: Anthropic API Key */}
+          {isOrgOwner && (
           <Card>
             <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
               Anthropic API Key
@@ -879,7 +997,10 @@ export default function SettingsPage() {
             </div>
           </Card>
 
+          )}
+
           {/* Section 4: AI System Prompt */}
+          {isOrgOwner && (
           <Card>
             <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
               AI System Prompt
@@ -937,78 +1058,135 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          {/* Section 5: Collaborators */}
+          )}
+
+          {/* Section 5: Team */}
           <Card>
             <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
-              Collaborators
+              Team
             </h3>
             <p className="text-xs text-muted mb-4">
-              Add email addresses of other users who can view and edit your Sales
-              Books. They must have an account with that email to access your
-              books.
+              {isOrgOwner
+                ? "Invite people to your organization. Owners manage settings and billing; Editors can use all features but can't change organization settings."
+                : "The members of your organization. Only an Owner can invite or manage members."}
             </p>
-            <div className="space-y-4">
-              <div className="flex gap-2">
+
+            {/* Invite form (Owner only) */}
+            {isOrgOwner && (
+              <div className="flex gap-2 mb-4">
                 <div className="flex-1">
                   <Input
                     placeholder="colleague@example.com"
-                    value={newCollaboratorEmail}
-                    onChange={(e) => setNewCollaboratorEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAddCollaborator()}
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleInvite()}
                   />
                 </div>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "editor" | "owner")}
+                  className="bg-surface border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/50"
+                >
+                  <option value="editor">Editor</option>
+                  <option value="owner">Owner</option>
+                </select>
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={handleAddCollaborator}
-                  disabled={!newCollaboratorEmail.trim()}
+                  onClick={handleInvite}
+                  loading={teamBusy}
+                  disabled={!inviteEmail.trim()}
                 >
-                  Add
+                  Invite
                 </Button>
               </div>
-              {collaboratorEmails.length > 0 && (
-                <ul className="space-y-2">
-                  {collaboratorEmails.map((email) => (
-                    <li
-                      key={email}
-                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface border border-border text-sm"
-                    >
-                      <span>{email}</span>
+            )}
+
+            {teamMessage && (
+              <p
+                className={`text-sm mb-3 ${
+                  teamMessage.startsWith("Error") ? "text-danger" : "text-success"
+                }`}
+              >
+                {teamMessage}
+              </p>
+            )}
+
+            {/* Members */}
+            {teamLoading ? (
+              <p className="text-xs text-muted">Loading team…</p>
+            ) : (
+              <ul className="space-y-2">
+                {members.map((m) => (
+                  <li
+                    key={m.user_id}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate">
+                        {m.full_name || m.email}
+                        {m.is_you && <span className="text-muted"> (you)</span>}
+                      </p>
+                      {m.full_name && (
+                        <p className="text-xs text-muted truncate">{m.email}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {isOrgOwner && !m.is_you ? (
+                        <>
+                          <select
+                            value={m.org_role}
+                            onChange={(e) => handleChangeRole(m.user_id, e.target.value)}
+                            disabled={teamBusy}
+                            className="bg-panel border border-border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent/50"
+                          >
+                            <option value="editor">Editor</option>
+                            <option value="owner">Owner</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMember(m.user_id)}
+                            disabled={teamBusy}
+                            className="text-muted hover:text-danger transition-colors text-xs"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted capitalize">{m.org_role}</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+
+                {/* Pending invites */}
+                {invites.map((inv) => (
+                  <li
+                    key={inv.id}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-surface border border-dashed border-border text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate">{inv.email}</p>
+                      <p className="text-xs text-muted">Pending invite · {inv.org_role}</p>
+                    </div>
+                    {isOrgOwner && (
                       <button
                         type="button"
-                        onClick={() => handleRemoveCollaborator(email)}
-                        className="text-muted hover:text-danger transition-colors text-xs"
+                        onClick={() => handleCancelInvite(inv.id)}
+                        disabled={teamBusy}
+                        className="text-muted hover:text-danger transition-colors text-xs flex-shrink-0"
                       >
-                        Remove
+                        Cancel
                       </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex items-center gap-3">
-                <Button
-                  onClick={handleCollaboratorsSave}
-                  loading={collaboratorsLoading}
-                  size="sm"
-                >
-                  Save Collaborators
-                </Button>
-                {collaboratorsMessage && (
-                  <span
-                    className={`text-sm ${
-                      collaboratorsMessage.startsWith("Error")
-                        ? "text-danger"
-                        : "text-success"
-                    }`}
-                  >
-                    {collaboratorsMessage}
-                  </span>
-                )}
-              </div>
-            </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
 
-          {/* Section 6: Sales Book Defaults */}
+          {/* Section 6: Sales Book Defaults (Owner only) */}
+          {isOrgOwner && (
           <Card>
             <h3 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
               Sales Book Defaults
@@ -1098,6 +1276,8 @@ export default function SettingsPage() {
               )}
             </div>
           </Card>
+
+          )}
 
           {/* Section 7: Price Lists */}
           <Card>

@@ -16,6 +16,7 @@ type UserRole = "admin" | "user";
 export interface SubscriptionInfo {
   entitled: boolean;
   is_admin: boolean;
+  is_org_owner: boolean;
   status: string | null;
   plan: "monthly" | "yearly" | null;
   current_period_end: string | null;
@@ -29,6 +30,7 @@ interface AuthContextType {
   loading: boolean;
   role: UserRole | null;
   isAdmin: boolean;
+  isOrgOwner: boolean;
   subscription: SubscriptionInfo | null;
   subscriptionLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
@@ -170,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         role,
         isAdmin: role === "admin",
+        isOrgOwner: subscription?.is_org_owner ?? false,
         subscription,
         subscriptionLoading,
         signIn,

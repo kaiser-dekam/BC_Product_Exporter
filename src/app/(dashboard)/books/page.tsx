@@ -20,7 +20,7 @@ interface Book {
 }
 
 export default function BooksPage() {
-  const { getIdToken } = useAuth();
+  const { getIdToken, isOrgOwner } = useAuth();
   const router = useRouter();
 
   const [books, setBooks] = useState<Book[]>([]);
@@ -165,6 +165,7 @@ export default function BooksPage() {
               book={book}
               onEdit={(id) => router.push(`/books/${id}`)}
               onDelete={handleDelete}
+              canDelete={isOrgOwner}
             />
           ))}
         </div>

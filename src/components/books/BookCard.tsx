@@ -17,10 +17,11 @@ interface BookCardProps {
   };
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  // Deleting a book is an Owner-only action in the org model.
+  canDelete?: boolean;
 }
 
-export default function BookCard({ book, onEdit, onDelete }: BookCardProps) {
-  const isOwned = book.is_owned_by_me !== false;
+export default function BookCard({ book, onEdit, onDelete, canDelete = true }: BookCardProps) {
   const sectionCount = book.sections?.length || 0;
   const productCount = book.sections?.reduce((sum, s) => sum + (s.products?.length || 0), 0) || 0;
   const updatedAt = book.updated_at?._seconds || book.updated_at?.seconds;
@@ -50,18 +51,13 @@ export default function BookCard({ book, onEdit, onDelete }: BookCardProps) {
         <span>{sectionCount} section{sectionCount !== 1 ? "s" : ""}</span>
         <span>{productCount} product{productCount !== 1 ? "s" : ""}</span>
         {dateStr && <span>Updated {dateStr}</span>}
-        {!isOwned && (
-          <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium">
-            Shared
-          </span>
-        )}
       </div>
 
       <div className="flex items-center gap-2 mt-1">
         <Button size="sm" onClick={() => onEdit(book.id)}>
           Edit Book
         </Button>
-        {isOwned && (
+        {canDelete && (
           <Button size="sm" variant="danger" onClick={() => onDelete(book.id)}>
             Delete
           </Button>
